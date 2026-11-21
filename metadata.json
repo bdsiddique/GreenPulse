@@ -1,0 +1,6 @@
+{
+  "name": "GridPulse — Power Distribution Simulator",
+  "description": "Standalone deterministic solar PV, battery storage, net-metering, and utility grid power distribution simulator with stress tests, fabricated data modeling, and saved scenario comparison.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
