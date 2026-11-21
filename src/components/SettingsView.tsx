@@ -321,7 +321,7 @@ export const SettingsView: React.FC = () => {
         }
         await importSavedSimulations(list);
       } catch {
-        setImportError('Invalid JSON file. Please choose a GridPulse backup export.');
+        setImportError(`Invalid JSON file. Please choose a ${appName} backup export.`);
       }
     };
     reader.readAsText(file);
@@ -738,15 +738,21 @@ export const SettingsView: React.FC = () => {
       {/* Admin-Protected App Name & Engineer Profile */}
       <section className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="flex items-start gap-2">
-            {adminStatus.authenticated ? (
-              <ShieldCheck className="w-4 h-4 text-emerald-600 mt-0.5 shrink-0" />
-            ) : (
-              <Lock className="w-4 h-4 text-slate-600 mt-0.5 shrink-0" />
-            )}
+          <div className="flex items-start gap-2.5">
+            <img
+              src="/assets/aistudio/bdtpower-logo_21164a7b.png"
+              alt={`${appName} logo`}
+              referrerPolicy="no-referrer"
+              className="w-9 h-9 object-contain shrink-0 rounded-md border border-slate-200 bg-white p-0.5"
+            />
             <div>
-              <h2 className="text-sm font-semibold text-slate-900">
-                App Identity & Engineer Profile
+              <h2 className="text-sm font-semibold text-slate-900 flex items-center gap-1.5">
+                {adminStatus.authenticated ? (
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                ) : (
+                  <Lock className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                )}
+                <span>App Identity & Engineer Profile</span>
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">
                 Changing the application name or engineer details requires an admin password.

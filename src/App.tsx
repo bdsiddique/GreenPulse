@@ -15,6 +15,7 @@ import { LibraryView } from './components/LibraryView';
 import { SettingsView } from './components/SettingsView';
 import { SimulationMenus } from './components/SimulationMenus';
 import { ExportPdfModal } from './components/ExportPdfModal';
+import { StressTestDashboard } from './components/StressTestDashboard';
 
 export default function App() {
   const {
@@ -102,6 +103,8 @@ export default function App() {
                 <AnalyticsCharts result={solved} config={config} />
               </div>
             )}
+
+            {workspaceMode === 'stress_test' && <StressTestDashboard />}
           </div>
         )}
 

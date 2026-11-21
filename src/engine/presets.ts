@@ -53,6 +53,18 @@ export function createDefaultStressTests(): ExtremeWeatherStressConfig {
       minTempC: -4,
       capacityDeratePct: 18,
     },
+    loadSurge: {
+      enabled: false,
+      startHour: 17,
+      durationHours: 4,
+      surgeMultiplier: 1.85,
+    },
+    priceSpike: {
+      enabled: false,
+      startHour: 16,
+      durationHours: 6,
+      multiplier: 3.0,
+    },
   };
 }
 
@@ -153,6 +165,14 @@ export function normalizeConfig(raw: Partial<SimulationConfig>): SimulationConfi
       coldSnap: {
         ...base.stressTests.coldSnap,
         ...(raw.stressTests?.coldSnap || {}),
+      },
+      loadSurge: {
+        ...base.stressTests.loadSurge,
+        ...(raw.stressTests?.loadSurge || {}),
+      },
+      priceSpike: {
+        ...base.stressTests.priceSpike,
+        ...(raw.stressTests?.priceSpike || {}),
       },
     },
   };

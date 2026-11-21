@@ -139,7 +139,8 @@ export function generateParametricInputs(rawConfig: SimulationConfig): HourlyInp
   const rawMean = shape.reduce((a, b) => a + b, 0) / shape.length;
   const peakContrast = clamp((config.loadPeakFactor - 1.0) / 0.7, 0.2, 2.2);
 
-  const { cloudyStreak, heatwaveSpike, monsoonSquall, coldSnap } = config.stressTests;
+  const { cloudyStreak, heatwaveSpike, monsoonSquall, coldSnap, loadSurge, priceSpike } =
+    config.stressTests;
   const effectivePvCap = config.plugModules.pvEnabled ? config.pvCapacityKw : 0;
   const forecast = config.appliedWeatherForecast;
 
@@ -253,6 +254,17 @@ export function generateParametricInputs(rawConfig: SimulationConfig): HourlyInp
       loadKw *= 1.22;
     }
 
+    // Extreme Grid Stress: Load Surge Event
+    let isLoadSurge = false;
+    if (
+      loadSurge.enabled &&
+      h >= loadSurge.startHour &&
+      h < loadSurge.startHour + loadSurge.durationHours
+    ) {
+      loadKw *= clamp(loadSurge.surgeMultiplier, 1.1, 4.0);
+      isLoadSurge = true;
+    }
+
     loadKw = round2(loadKw);
 
     const matchedOutage = config.outageWindows.find(
@@ -274,7 +286,19 @@ export function generateParametricInputs(rawConfig: SimulationConfig): HourlyInp
     const isPeakTariff =
       config.touEnabled &&
       isHourInPeak(hourOfDay, config.peakStartHour, config.peakEndHour);
-    const importRate = isPeakTariff ? config.peakRate : config.offPeakRate;
+    let importRate = isPeakTariff ? config.peakRate : config.offPeakRate;
+
+    // Extreme Grid Stress: Variable Pricing Spike Event
+    let isPriceSpike = false;
+    if (
+      priceSpike.enabled &&
+      h >= priceSpike.startHour &&
+      h < priceSpike.startHour + priceSpike.durationHours
+    ) {
+      importRate = round2(importRate * clamp(priceSpike.multiplier, 1.2, 6.0));
+      isPriceSpike = true;
+    }
+
     const exportRate = config.netMeteringInstalled ? config.exportCreditRate : 0;
 
     steps.push({
@@ -296,6 +320,8 @@ export function generateParametricInputs(rawConfig: SimulationConfig): HourlyInp
       isHeatwave,
       isMonsoonSquall,
       isColdSnap,
+      isLoadSurge,
+      isPriceSpike,
       outageLabel,
     });
   }
@@ -410,6 +436,8 @@ function resolveInputSteps(config: SimulationConfig): HourlyInputStep[] {
       isHeatwave: ambientCalc.isHeatwave,
       isMonsoonSquall: false,
       isColdSnap: ambientCalc.isColdSnap,
+      isLoadSurge: false,
+      isPriceSpike: false,
       outageLabel: !config.plugModules.gridEnabled
         ? 'Grid Module Unplugged (Off-Grid)'
         : row.gridOnline
@@ -492,6 +520,8 @@ export function solveSimulation(rawConfig: SimulationConfig): SimulationResult {
     if (step.isHeatwave) activeEvents.push('HEATWAVE_SPIKE');
     if (step.isMonsoonSquall) activeEvents.push('MONSOON_SQUALL');
     if (step.isColdSnap) activeEvents.push('COLD_SNAP');
+    if (step.isLoadSurge) activeEvents.push('LOAD_SURGE');
+    if (step.isPriceSpike) activeEvents.push('PRICE_SPIKE');
     if (step.isPeakTariff) activeEvents.push('PEAK_TARIFF');
 
     const pvAvailableKw = step.pvRawKw;

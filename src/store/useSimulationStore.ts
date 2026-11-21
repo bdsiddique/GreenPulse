@@ -60,12 +60,12 @@ const LS_DEFAULT_PANEL_KEY = 'gridpulse_default_solar_panel_v1';
 const LS_SCENARIO_PROFILES_KEY = 'gridpulse_scenario_profiles_v1';
 
 const LS_LOCATION_CITY_KEY = 'gridpulse_weather_city_v1';
-const DEFAULT_APP_NAME = 'GridPulse';
+const DEFAULT_APP_NAME = 'GreenPulse';
 
 const DEFAULT_PROFILE: UserProfile = {
   name: 'Tariq Siddique',
   role: 'Lead Power Systems Engineer',
-  organization: 'GridPulse Energy Labs',
+  organization: 'BDT Power Ltd · Green Power Nursery',
   email: 'siddique.unm@gmail.com',
   locationCity: 'Dhaka',
 };

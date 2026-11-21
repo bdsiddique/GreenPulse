@@ -127,25 +127,42 @@ interface PasswordResetRow {
   created_at: number;
 }
 
-const DEFAULT_APP_NAME = 'GridPulse';
+const DEFAULT_APP_NAME = 'GreenPulse';
 const DEFAULT_USER_PROFILE: StoredUserProfile = {
   name: 'Tariq Siddique',
   role: 'Lead Power Systems Engineer',
-  organization: 'GridPulse Energy Labs',
+  organization: 'BDT Power Ltd · Green Power Nursery',
   email: 'siddique.unm@gmail.com',
   locationCity: 'Dhaka',
 };
 
-// Seed default workspace identity once
+// Seed default workspace identity once (and migrate legacy untouched GridPulse default to GreenPulse)
 const existingSettings = db
-  .prepare('SELECT id FROM app_settings WHERE id = 1')
-  .get() as { id: number } | undefined;
+  .prepare('SELECT id, app_name, user_profile_json FROM app_settings WHERE id = 1')
+  .get() as { id: number; app_name: string; user_profile_json: string } | undefined;
 
 if (!existingSettings) {
   db.prepare(
     `INSERT INTO app_settings (id, app_name, user_profile_json, updated_at)
      VALUES (1, ?, ?, ?)`
   ).run(DEFAULT_APP_NAME, JSON.stringify(DEFAULT_USER_PROFILE), new Date().toISOString());
+} else if (existingSettings.app_name === 'GridPulse') {
+  let nextProfileJson = existingSettings.user_profile_json;
+  try {
+    const parsed = JSON.parse(existingSettings.user_profile_json) as Partial<StoredUserProfile>;
+    if (!parsed.organization || parsed.organization === 'GridPulse Energy Labs') {
+      nextProfileJson = JSON.stringify({
+        ...DEFAULT_USER_PROFILE,
+        ...parsed,
+        organization: DEFAULT_USER_PROFILE.organization,
+      });
+    }
+  } catch {
+    nextProfileJson = JSON.stringify(DEFAULT_USER_PROFILE);
+  }
+  db.prepare(
+    `UPDATE app_settings SET app_name = ?, user_profile_json = ?, updated_at = ? WHERE id = 1`
+  ).run(DEFAULT_APP_NAME, nextProfileJson, new Date().toISOString());
 }
 
 // --- Security & Crypto Helpers ---

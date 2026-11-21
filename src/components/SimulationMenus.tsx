@@ -157,6 +157,21 @@ export const SimulationMenus: React.FC = () => {
                 type="button"
                 role="menuitem"
                 onClick={() => {
+                  setActiveTab('simulations');
+                  setWorkspaceMode('stress_test');
+                  setOpenMenu(null);
+                }}
+                className="w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-100 flex items-center justify-between"
+              >
+                <span>Stress Test Dashboard</span>
+                {workspaceMode === 'stress_test' && (
+                  <span className="text-blue-600 font-semibold">✓</span>
+                )}
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
                   setLibraryTab('compare');
                   setActiveTab('library');
                   setOpenMenu(null);

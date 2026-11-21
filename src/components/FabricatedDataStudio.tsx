@@ -1,10 +1,13 @@
-import React, { useRef, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
   ClipboardPaste,
+  CloudSun,
   Download,
+  Globe,
   RefreshCw,
   Settings,
+  Shuffle,
   Sun,
   Upload,
   Zap,
@@ -18,6 +21,16 @@ import {
   rowsToCsv,
 } from '../engine/dispatchEngine';
 import { calculatePvOutputKw } from '../engine/solarPanels';
+import {
+  applyClimatePatternToRows,
+  type ClimatePatternResult,
+  type ClimateSeasonId,
+  type ClimateZoneId,
+  fetchHistoricalClimatePattern,
+  REGIONAL_CLIMATE_ZONES,
+  SEASON_OPTIONS,
+  simulateRegionalClimatePattern,
+} from '../engine/climatePatterns';
 import { useSimulationStore } from '../store/useSimulationStore';
 
 export const FabricatedDataStudio: React.FC = () => {
@@ -41,6 +54,59 @@ export const FabricatedDataStudio: React.FC = () => {
   const [pasteText, setPasteText] = useState('');
   const [importErrors, setImportErrors] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Regional Climate Historical Weather Generator state
+  const [climateId, setClimateId] = useState<ClimateZoneId>('tropical');
+  const [seasonId, setSeasonId] = useState<ClimateSeasonId>('summer');
+  const [climateSeed, setClimateSeed] = useState<number>(1);
+  const [scaleHvacLoad, setScaleHvacLoad] = useState<boolean>(false);
+  const [isFetchingClimate, setIsFetchingClimate] = useState<boolean>(false);
+  const [lastAppliedPattern, setLastAppliedPattern] = useState<ClimatePatternResult | null>(null);
+
+  const selectedClimateZone = useMemo(
+    () =>
+      REGIONAL_CLIMATE_ZONES.find((z) => z.id === climateId) || REGIONAL_CLIMATE_ZONES[0],
+    [climateId]
+  );
+
+  const handleSimulateClimate = (nextSeed = climateSeed) => {
+    const pattern = simulateRegionalClimatePattern({
+      climateId,
+      season: seasonId,
+      horizonHours: config.horizonHours,
+      seed: nextSeed,
+    });
+    const nextRows = applyClimatePatternToRows(rows, pattern, scaleHvacLoad);
+    setFabricatedRows(nextRows);
+    setLastAppliedPattern(pattern);
+    showToast(
+      `Simulated ${config.horizonHours}h ${pattern.climateName} (${seasonId}) weather · Peak ${pattern.peakWm2} W/m² · ${pattern.peakSunHoursPerDay} PSH/d.`,
+      'success'
+    );
+  };
+
+  const handleFetchHistoricalClimate = async () => {
+    setIsFetchingClimate(true);
+    try {
+      const pattern = await fetchHistoricalClimatePattern({
+        climateId,
+        season: seasonId,
+        horizonHours: config.horizonHours,
+        seed: climateSeed,
+      });
+      const nextRows = applyClimatePatternToRows(rows, pattern, scaleHvacLoad);
+      setFabricatedRows(nextRows);
+      setLastAppliedPattern(pattern);
+      showToast(
+        pattern.source === 'archive_api'
+          ? `Fetched ERA5 historical weather for ${pattern.referenceCity} (${pattern.climateName}) · ${pattern.peakSunHoursPerDay} PSH/d.`
+          : `Archive unreachable; applied calibrated ${pattern.climateName} climate model.`,
+        pattern.source === 'archive_api' ? 'success' : 'info'
+      );
+    } finally {
+      setIsFetchingClimate(false);
+    }
+  };
 
   const handleApplyPaste = () => {
     const { rows: parsed, errors } = parseFabricatedImport(
@@ -101,8 +167,8 @@ export const FabricatedDataStudio: React.FC = () => {
     const a = document.createElement('a');
     a.href = url;
     a.download = templateOnly
-      ? `gridpulse_irradiation_template_${config.horizonHours}h.csv`
-      : `gridpulse_hourly_dataset_${config.horizonHours}h.csv`;
+      ? `greenpulse_irradiation_template_${config.horizonHours}h.csv`
+      : `greenpulse_hourly_dataset_${config.horizonHours}h.csv`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -261,6 +327,112 @@ export const FabricatedDataStudio: React.FC = () => {
           <Settings className="w-3 h-3" />
           Configure Panels in Settings
         </button>
+      </div>
+
+      {/* Regional Climate Historical Weather Fetcher & Simulator */}
+      <div className="px-4 py-3 bg-white border-b border-slate-200 space-y-2.5">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <CloudSun className="w-4 h-4 text-sky-600 shrink-0" />
+            <span className="text-xs font-semibold text-slate-900">
+              Regional Climate Weather Generator
+            </span>
+            <span className="text-[11px] text-slate-500">
+              · Auto-fill all {config.horizonHours} hours from historical climate patterns instead of manual entry
+            </span>
+          </div>
+          {lastAppliedPattern && (
+            <span className="font-mono tabular-nums text-[11px] text-slate-600">
+              {lastAppliedPattern.source === 'archive_api' ? 'ERA5 Archive' : 'Climate Model'} ·{' '}
+              {lastAppliedPattern.referenceCity} · Peak {lastAppliedPattern.peakWm2} W/m² ·{' '}
+              {lastAppliedPattern.peakSunHoursPerDay} PSH/d · {lastAppliedPattern.minTempC}–
+              {lastAppliedPattern.maxTempC}°C
+            </span>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            aria-label="Regional climate zone"
+            value={climateId}
+            onChange={(e) => setClimateId(e.target.value as ClimateZoneId)}
+            className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-medium text-slate-800 focus:outline-none focus:bg-white focus:border-slate-500"
+          >
+            {REGIONAL_CLIMATE_ZONES.map((z) => (
+              <option key={z.id} value={z.id}>
+                {z.name} — {z.referenceCity} ({z.koppenCode})
+              </option>
+            ))}
+          </select>
+
+          <div className="inline-flex items-center p-0.5 bg-slate-100 rounded-md text-[11px]">
+            {SEASON_OPTIONS.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => setSeasonId(s.id)}
+                title={s.hint}
+                className={`px-2 py-1 rounded font-medium transition-colors whitespace-nowrap ${
+                  seasonId === s.id
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
+
+          <label className="inline-flex items-center gap-1.5 text-[11px] text-slate-600 px-1.5 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={scaleHvacLoad}
+              onChange={(e) => setScaleHvacLoad(e.target.checked)}
+              className="rounded border-slate-300 text-slate-900 focus:ring-slate-900"
+            />
+            <span>Scale HVAC load to temp</span>
+          </label>
+
+          <div className="flex items-center gap-1.5 ml-auto">
+            <button
+              type="button"
+              onClick={() => handleSimulateClimate(climateSeed)}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-slate-200 bg-slate-50 hover:bg-slate-100 text-xs font-medium text-slate-800 whitespace-nowrap"
+            >
+              <Sun className="w-3.5 h-3.5 text-amber-600" />
+              Simulate {config.horizonHours}h Pattern
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                const nextSeed = climateSeed + 1;
+                setClimateSeed(nextSeed);
+                handleSimulateClimate(nextSeed);
+              }}
+              className="inline-flex items-center gap-1 px-2 py-1.5 rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-xs font-medium text-slate-600 whitespace-nowrap"
+              title="Re-roll stochastic cloud & temperature variation"
+            >
+              <Shuffle className="w-3.5 h-3.5" />
+              Vary
+            </button>
+
+            <button
+              type="button"
+              disabled={isFetchingClimate}
+              onClick={handleFetchHistoricalClimate}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-slate-900 hover:bg-slate-800 disabled:opacity-60 text-white text-xs font-semibold whitespace-nowrap"
+            >
+              <Globe className={`w-3.5 h-3.5 ${isFetchingClimate ? 'animate-spin' : ''}`} />
+              {isFetchingClimate ? 'Fetching ERA5...' : 'Fetch Historical (ERA5)'}
+            </button>
+          </div>
+        </div>
+
+        <p className="text-[11px] text-slate-500">
+          <span className="font-medium text-slate-700">{selectedClimateZone.name}:</span>{' '}
+          {selectedClimateZone.summary}
+        </p>
       </div>
 
       {/* Inline Paste CSV/JSON Drawer */}

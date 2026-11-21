@@ -2,7 +2,7 @@ export type CurrencyCode = 'BDT' | 'USD' | 'EUR' | 'INR';
 export type HorizonHours = 24 | 72;
 export type InputMode = 'parametric' | 'fabricated';
 export type AppTab = 'simulations' | 'load_bill' | 'library' | 'settings';
-export type SimWorkspaceMode = 'sandbox' | 'fabricated' | 'compare';
+export type SimWorkspaceMode = 'sandbox' | 'fabricated' | 'stress_test' | 'compare';
 
 export type LoadArchetype =
   | 'residential_evening'
@@ -39,7 +39,9 @@ export type StepEventTag =
   | 'EXPORT_CAPPED'
   | 'PV_CURTAILED'
   | 'GRID_CAP_BREACH'
-  | 'UNSERVED_LOAD';
+  | 'UNSERVED_LOAD'
+  | 'LOAD_SURGE'
+  | 'PRICE_SPIKE';
 
 export interface OutageWindow {
   id: string;
@@ -121,6 +123,18 @@ export interface ExtremeWeatherStressConfig {
     enabled: boolean;
     minTempC: number;
     capacityDeratePct: number;
+  };
+  loadSurge: {
+    enabled: boolean;
+    startHour: number;
+    durationHours: number;
+    surgeMultiplier: number;
+  };
+  priceSpike: {
+    enabled: boolean;
+    startHour: number;
+    durationHours: number;
+    multiplier: number;
   };
 }
 
@@ -230,6 +244,8 @@ export interface HourlyInputStep {
   isHeatwave: boolean;
   isMonsoonSquall: boolean;
   isColdSnap: boolean;
+  isLoadSurge: boolean;
+  isPriceSpike: boolean;
   outageLabel: string | null;
 }
 

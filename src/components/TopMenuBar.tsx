@@ -19,7 +19,6 @@ import {
   Sunset,
   User,
   Wind,
-  Zap,
 } from 'lucide-react';
 import type {
   HorizonHours,
@@ -490,9 +489,12 @@ export const TopMenuBar: React.FC = () => {
           }}
           className="flex items-center gap-1.5 px-2 h-6 rounded hover:bg-slate-200/70 transition-colors font-semibold text-slate-900 whitespace-nowrap shrink-0"
         >
-          <span className="inline-flex items-center justify-center w-4 h-4 rounded bg-slate-900 text-amber-400">
-            <Zap className="w-2.5 h-2.5 fill-current" />
-          </span>
+          <img
+            src="/assets/aistudio/bdtpower-logo_21164a7b.png"
+            alt={`${appName} logo`}
+            referrerPolicy="no-referrer"
+            className="w-5 h-5 object-contain shrink-0"
+          />
           <span className="max-w-[140px] truncate">{appName}</span>
         </button>
 
@@ -600,7 +602,7 @@ export const TopMenuBar: React.FC = () => {
           )}
         </div>
 
-        {/* Folded Simulation Workspace Tabs (Overview | Hourly Data) */}
+        {/* Folded Simulation Workspace Tabs (Overview | Hourly Data | Stress Test) */}
         {activeTab === 'simulations' && (
           <nav
             aria-label="Simulation views"
@@ -610,6 +612,7 @@ export const TopMenuBar: React.FC = () => {
               [
                 { id: 'sandbox', label: 'Overview' },
                 { id: 'fabricated', label: 'Hourly Data' },
+                { id: 'stress_test', label: 'Stress Test' },
               ] as Array<{ id: SimWorkspaceMode; label: string }>
             ).map((tab) => {
               const active = workspaceMode === tab.id;
