@@ -82,6 +82,31 @@ export interface SolarPanelSpec {
   isBuiltIn?: boolean;
 }
 
+export type ObstructionType = 'tree' | 'building' | 'parapet' | 'chimney';
+
+export type ObstructionAzimuth =
+  | 'east'
+  | 'south_east'
+  | 'south'
+  | 'south_west'
+  | 'west';
+
+export interface ShadowObstruction {
+  id: string;
+  name: string;
+  type: ObstructionType;
+  azimuth: ObstructionAzimuth;
+  heightAboveArrayM: number; // Height above PV array plane in meters
+  distanceM: number;         // Horizontal distance from array edge in meters
+  widthCoveragePct: number;  // Horizontal sector/array coverage (10–100%)
+  foliageDensityPct: number; // Opacity (100% for solid buildings, 40–90% for trees)
+}
+
+export interface ShadowFactorConfig {
+  enabled: boolean;
+  obstructions: ShadowObstruction[];
+}
+
 export interface WeatherForecastProfile {
   locationLabel: string;
   lat: number;
@@ -179,6 +204,9 @@ export interface SimulationConfig {
   // Selected Solar Panel Model & Specs (configured in Settings)
   solarPanelId: string;
   solarPanelSnapshot: SolarPanelSpec;
+
+  // Site Shading / Obstruction Factor Calculator
+  shadowConfig: ShadowFactorConfig;
 
   // System assets
   pvCapacityKw: number;

@@ -10,6 +10,7 @@ import type {
 import { CURRENCIES } from './currencies';
 import { BUILTIN_SOLAR_PRESETS, normalizeSolarPreset } from './solarPresets';
 import { BUILTIN_SOLAR_PANELS, normalizeSolarPanel } from './solarPanels';
+import { createDefaultShadowConfig, normalizeShadowConfig } from './shadowFactor';
 
 export interface ScenarioDefinition {
   id: Exclude<ScenarioId, 'custom'>;
@@ -88,6 +89,8 @@ export function createDefaultConfig(currency: CurrencyCode = 'BDT'): SimulationC
     solarPanelId: defaultPanel.id,
     solarPanelSnapshot: defaultPanel,
 
+    shadowConfig: createDefaultShadowConfig(),
+
     pvCapacityKw: 6.0,
     inverterRatedKw: 6.0,
     inverterEfficiencyPct: 95,
@@ -145,6 +148,7 @@ export function normalizeConfig(raw: Partial<SimulationConfig>): SimulationConfi
     appliedWeatherForecast: raw.appliedWeatherForecast ?? null,
     solarPanelId: matchedPanel.id,
     solarPanelSnapshot: matchedPanel,
+    shadowConfig: normalizeShadowConfig(raw.shadowConfig),
     plugModules: {
       ...base.plugModules,
       ...(raw.plugModules || {}),

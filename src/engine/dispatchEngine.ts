@@ -12,6 +12,7 @@ import type {
 } from '../types/simulation';
 import { normalizeConfig } from './presets';
 import { calculatePvOutputKw } from './solarPanels';
+import { getHourlyShadowCoefficient } from './shadowFactor';
 
 // Normalized 24-hour shape factors (mean === 1.0)
 const LOAD_SHAPES: Record<LoadArchetype, number[]> = {
@@ -215,7 +216,9 @@ export function generateParametricInputs(rawConfig: SimulationConfig): HourlyInp
       isMonsoonSquall = true;
     }
 
-    irradianceWm2 = Math.round(clamp(irradianceWm2, 0, 1400));
+    // Apply Site Shadow Factor Reduction Coefficient (trees / structures)
+    const shadowCoeff = getHourlyShadowCoefficient(config.shadowConfig, hourOfDay);
+    irradianceWm2 = Math.round(clamp(irradianceWm2 * shadowCoeff, 0, 1400));
 
     // Calculate physical PV generation from solar irradiation, installed kWp, ambient temp, and selected panel specs
     const panelCalc = calculatePvOutputKw({
@@ -406,7 +409,9 @@ function resolveInputSteps(config: SimulationConfig): HourlyInputStep[] {
       config.touEnabled &&
       isHourInPeak(hourOfDay, config.peakStartHour, config.peakEndHour);
     const gridOnline = config.plugModules.gridEnabled && Boolean(row.gridOnline);
-    const irradianceWm2 = Math.round(clamp(Number(row.irradianceWm2) || 0, 0, 1400));
+    const rawIrradianceWm2 = Math.round(clamp(Number(row.irradianceWm2) || 0, 0, 1400));
+    const shadowCoeff = getHourlyShadowCoefficient(config.shadowConfig, hourOfDay);
+    const irradianceWm2 = Math.round(clamp(rawIrradianceWm2 * shadowCoeff, 0, 1400));
 
     // Dynamically calculate PV output from irradiance + installed solar capacity + selected panel specs
     const panelCalc = calculatePvOutputKw({

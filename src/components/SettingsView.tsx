@@ -22,6 +22,7 @@ import type {
 } from '../types/simulation';
 import { CURRENCIES, CURRENCY_LIST, formatRate } from '../engine/currencies';
 import { useSimulationStore } from '../store/useSimulationStore';
+import { ShadowFactorCalculator } from './ShadowFactorCalculator';
 
 const PANEL_TECHNOLOGIES: SolarPanelTechnology[] = [
   'N-Type TOPCon',
@@ -734,6 +735,9 @@ export const SettingsView: React.FC = () => {
           </form>
         </div>
       </section>
+
+      {/* Site Shadow Factor Calculator (Trees & Structures Shading Coefficient) */}
+      <ShadowFactorCalculator />
 
       {/* Admin-Protected App Name & Engineer Profile */}
       <section className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">

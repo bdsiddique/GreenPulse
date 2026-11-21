@@ -22,6 +22,10 @@ import {
 } from '../engine/dispatchEngine';
 import { calculatePvOutputKw } from '../engine/solarPanels';
 import {
+  evaluateShadowConfig,
+  getHourlyShadowCoefficient,
+} from '../engine/shadowFactor';
+import {
   applyClimatePatternToRows,
   type ClimatePatternResult,
   type ClimateSeasonId,
@@ -195,6 +199,11 @@ export const FabricatedDataStudio: React.FC = () => {
     showToast(`Injected 3-hour grid outage at Hr ${start}–${start + 2}.`, 'info');
   };
 
+  const shadowSummary = useMemo(
+    () => evaluateShadowConfig(config.shadowConfig),
+    [config.shadowConfig]
+  );
+
   const samplePanelStats = calculatePvOutputKw({
     irradianceWm2: 1000,
     pvCapacityKw: config.pvCapacityKw,
@@ -317,6 +326,12 @@ export const FabricatedDataStudio: React.FC = () => {
           <span className="font-semibold text-slate-900">{panel.name}</span>
           <span className="font-mono tabular-nums text-[11px] text-slate-600">
             {config.pvCapacityKw.toFixed(1)} kWp (~{samplePanelStats.effectivePanelCount} panels · {samplePanelStats.arrayAreaM2} m²) · Eff {panel.efficiencyPct}% · {panel.tempCoeffPctPerC}%/°C · NOCT {panel.noctC}°C · BOS -{panel.systemLossPct}%
+            {shadowSummary.enabled && shadowSummary.obstructionCount > 0 && (
+              <span className="text-amber-700 font-semibold">
+                {' '}
+                · Shade {shadowSummary.dailyEffectiveCoefficient.toFixed(2)}× (-{shadowSummary.dailyLossPct.toFixed(1)}%)
+              </span>
+            )}
           </span>
         </div>
         <button
@@ -520,8 +535,10 @@ export const FabricatedDataStudio: React.FC = () => {
               const isSelected = row.hour === selectedHour;
               const diurnalAmb = 26 + Math.sin(((hourOfDay - 9) / 24) * 2 * Math.PI) * 4.5;
               const ambTempC = row.ambientTempC ?? diurnalAmb;
+              const shadowCoeff = getHourlyShadowCoefficient(config.shadowConfig, hourOfDay);
+              const effectiveIrr = Math.round(row.irradianceWm2 * shadowCoeff);
               const computed = calculatePvOutputKw({
-                irradianceWm2: row.irradianceWm2,
+                irradianceWm2: effectiveIrr,
                 pvCapacityKw: config.pvCapacityKw,
                 ambientTempC: ambTempC,
                 panel,
