@@ -1,4 +1,5 @@
 import type {
+  BatteryDegradationConfig,
   CurrencyCode,
   ExtremeWeatherStressConfig,
   HardwareTemplate,
@@ -26,6 +27,15 @@ export function createDefaultPlugModules(): PlugModulesConfig {
     pvEnabled: true,
     batteryEnabled: true,
     gridEnabled: true,
+  };
+}
+
+export function createDefaultBatteryDegradation(): BatteryDegradationConfig {
+  return {
+    enabled: true,
+    priorCycles: 300,
+    dodStressExponent: 1.35,
+    cycleFadePerFullCyclePct: 0.0045,
   };
 }
 
@@ -100,6 +110,7 @@ export function createDefaultConfig(currency: CurrencyCode = 'BDT'): SimulationC
     batteryInitialSocPct: 55,
     batteryMinReserveSocPct: 15,
     batteryRoundTripEffPct: 90,
+    batteryDegradation: createDefaultBatteryDegradation(),
 
     householdAvgKw: 2.2,
     loadArchetype: 'residential_evening',
@@ -149,6 +160,22 @@ export function normalizeConfig(raw: Partial<SimulationConfig>): SimulationConfi
     solarPanelId: matchedPanel.id,
     solarPanelSnapshot: matchedPanel,
     shadowConfig: normalizeShadowConfig(raw.shadowConfig),
+    batteryDegradation: {
+      ...base.batteryDegradation,
+      ...(raw.batteryDegradation || {}),
+      priorCycles: Math.max(
+        0,
+        Math.min(5000, Number(raw.batteryDegradation?.priorCycles ?? base.batteryDegradation.priorCycles) || 0)
+      ),
+      dodStressExponent: Math.max(
+        0.8,
+        Math.min(2.5, Number(raw.batteryDegradation?.dodStressExponent ?? base.batteryDegradation.dodStressExponent) || 1.35)
+      ),
+      cycleFadePerFullCyclePct: Math.max(
+        0.001,
+        Math.min(0.05, Number(raw.batteryDegradation?.cycleFadePerFullCyclePct ?? base.batteryDegradation.cycleFadePerFullCyclePct) || 0.0045)
+      ),
+    },
     plugModules: {
       ...base.plugModules,
       ...(raw.plugModules || {}),

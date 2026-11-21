@@ -16,6 +16,7 @@ import {
 import type { HourlyStepResult, SimulationConfig } from '../types/simulation';
 import { formatMoney } from '../engine/currencies';
 import { useSimulationStore } from '../store/useSimulationStore';
+import { TimelineScrubber } from './TimelineScrubber';
 
 interface PowerFlowSchematicProps {
   steps: HourlyStepResult[];
@@ -630,16 +631,24 @@ export const PowerFlowSchematic: React.FC<PowerFlowSchematicProps> = ({
               </>
             )}
             <text x="16" y="102" fill="#CBD5E1" className="font-mono text-[11px]">
-              {battPlugged ? `${step.batteryEnergyKwh.toFixed(2)} kWh` : 'Bypassed'}
+              {battPlugged
+                ? `${step.batteryEnergyKwh.toFixed(1)} / ${step.effectiveBatteryCapKwh.toFixed(1)} kWh`
+                : 'Bypassed'}
             </text>
             <text
               x="184"
               y="102"
               textAnchor="end"
-              fill={step.thermalStressFactor > 1.5 ? '#FBBF24' : '#94A3B8'}
-              className="font-mono text-[10px]"
+              fill={
+                step.batteryHealthPct < 80
+                  ? '#F87171'
+                  : step.batteryHealthPct < 90
+                    ? '#FBBF24'
+                    : '#4ADE80'
+              }
+              className="font-mono text-[10px] font-semibold"
             >
-              {battPlugged ? `Wear ${step.thermalStressFactor.toFixed(1)}x` : ''}
+              {battPlugged ? `Health ${step.batteryHealthPct.toFixed(1)}%` : ''}
             </text>
           </g>
 
@@ -867,48 +876,16 @@ export const PowerFlowSchematic: React.FC<PowerFlowSchematicProps> = ({
           </div>
         </div>
 
-        {/* Interactive Clickable Hourly Timeline Bar (replaces range slider) */}
-        <div className="space-y-1">
-          <div className="flex items-center gap-[2px] h-3.5 rounded overflow-hidden bg-slate-900/90 p-0.5">
-            {steps.map((s) => {
-              const color =
-                s.gridCapBreachKw > 0.01 || s.unservedLoadKw > 0.01
-                  ? 'bg-rose-500'
-                  : !s.gridOnline
-                    ? 'bg-amber-500'
-                    : s.activeEvents.includes('HEATWAVE_SPIKE')
-                      ? 'bg-orange-500/85'
-                      : s.pvCurtailedKw > 0.05
-                        ? 'bg-yellow-500/75'
-                        : s.gridExportKw > 0.05
-                          ? 'bg-emerald-500/80'
-                          : 'bg-slate-700/80';
-              return (
-                <button
-                  key={s.hour}
-                  type="button"
-                  onClick={() => {
-                    setIsPlaying(false);
-                    setSelectedHour(s.hour);
-                  }}
-                  title={`${s.clockLabel} · Load ${s.householdLoadKw} kW · Cell ${s.batteryCellTempC}°C`}
-                  className={`flex-1 h-full rounded-[1px] transition-opacity ${color} ${
-                    s.hour === selectedHour
-                      ? 'opacity-100 ring-1 ring-white scale-y-110'
-                      : 'opacity-65 hover:opacity-100'
-                  }`}
-                />
-              );
-            })}
-          </div>
-          <div className="flex items-center justify-between text-[10px] font-mono text-slate-500">
-            <span>00:00 (Click any bar or type hour)</span>
-            <span>
-              {config.horizonHours === 72 ? 'Day 2 · 12:00' : '12:00'}
-            </span>
-            <span>{config.horizonHours === 72 ? 'Day 3 · 23:00' : '23:00'}</span>
-          </div>
-        </div>
+        {/* Interactive Draggable Visual Timeline Scrubber */}
+        <TimelineScrubber
+          steps={steps}
+          selectedHour={selectedHour}
+          horizonHours={config.horizonHours}
+          onScrub={(hour) => {
+            setIsPlaying(false);
+            setSelectedHour(hour);
+          }}
+        />
       </div>
     </section>
   );

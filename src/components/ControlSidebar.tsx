@@ -228,7 +228,7 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({ summary }) => {
         {/* Active Tab Module Body */}
         <div>
           {activeSidebarTab === 'stressTests' && <StressTestsPanel summary={summary} />}
-          {activeSidebarTab === 'assets' && <AssetsModule />}
+          {activeSidebarTab === 'assets' && <AssetsModule summary={summary} />}
           {activeSidebarTab === 'load' && <LoadModule />}
           {activeSidebarTab === 'grid' && <GridModule />}
         </div>

@@ -107,6 +107,13 @@ export interface ShadowFactorConfig {
   obstructions: ShadowObstruction[];
 }
 
+export interface BatteryDegradationConfig {
+  enabled: boolean;
+  priorCycles: number;              // Existing accumulated DoD cycles (0–5000)
+  dodStressExponent: number;        // Nonlinear Wöhler DoD exponent (default 1.35)
+  cycleFadePerFullCyclePct: number; // Base % SoH fade per 100% equivalent cycle at 50% ref DoD
+}
+
 export interface WeatherForecastProfile {
   locationLabel: string;
   lat: number;
@@ -218,6 +225,7 @@ export interface SimulationConfig {
   batteryInitialSocPct: number;
   batteryMinReserveSocPct: number;
   batteryRoundTripEffPct: number;
+  batteryDegradation: BatteryDegradationConfig;
 
   // Household demand
   householdAvgKw: number;
@@ -296,12 +304,15 @@ export interface HourlyStepResult {
   batterySocPct: number;
   batteryEnergyKwh: number;
 
-  // Battery thermal & longevity telemetry
+  // Battery thermal, DoD degradation & longevity telemetry
   ambientTempC: number;
   batteryCellTempC: number;
   thermalStressFactor: number;
   hourlyWearIndex: number;
   cumulativeDegradationPct: number;
+  batteryHealthPct: number;
+  effectiveBatteryCapKwh: number;
+  stepDodPct: number;
 
   gridOnline: boolean;
   gridImportKw: number;
@@ -348,7 +359,12 @@ export interface SimulationSummary {
   minBatterySocPct: number;
   endBatterySocPct: number;
 
-  // Battery storage longevity metrics
+  // Battery storage health & longevity metrics
+  batteryHealthPct: number;
+  effectiveBatteryCapacityKwh: number;
+  capacityLostKwh: number;
+  avgDodPct: number;
+  maxDodPct: number;
   equivalentFullCyclesPerDay: number;
   peakBatteryCellTempC: number;
   avgThermalStressFactor: number;

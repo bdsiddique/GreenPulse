@@ -71,6 +71,13 @@ export const AnalyticsCharts: React.FC<AnalyticsChartsProps> = ({
   const hasFaults = summary.gridCapBreachHours > 0 || summary.totalUnservedLoadKwh > 0.05;
   const batteryActive = config.plugModules.batteryEnabled && config.batteryCapacityKwh > 0;
 
+  const batteryHealthTone =
+    summary.batteryHealthPct >= 90
+      ? 'text-emerald-700'
+      : summary.batteryHealthPct >= 80
+        ? 'text-amber-700'
+        : 'text-rose-700';
+
   const longevityTone =
     summary.longevityRating === 'Optimal'
       ? 'text-emerald-700'
@@ -192,7 +199,7 @@ export const AnalyticsCharts: React.FC<AnalyticsChartsProps> = ({
       )}
 
       {/* Full-Width Tabular KPI Summary Strip */}
-      <div className="bg-white border border-slate-200 rounded-xl grid grid-cols-2 sm:grid-cols-5 divide-y sm:divide-y-0 sm:divide-x divide-slate-200 overflow-hidden">
+      <div className="bg-white border border-slate-200 rounded-xl grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 divide-y md:divide-y-0 md:divide-x divide-slate-200 overflow-hidden">
         <div className="px-3.5 py-3">
           <div className="text-[11px] font-medium text-slate-500">
             PV Generated ({summary.horizonHours}h)
@@ -214,6 +221,36 @@ export const AnalyticsCharts: React.FC<AnalyticsChartsProps> = ({
           </div>
           <div className="text-[11px] text-slate-500 font-mono tabular-nums">
             Disch {summary.totalBatteryDischargedKwh.toFixed(1)} · End {summary.endBatterySocPct.toFixed(0)}%
+          </div>
+        </div>
+
+        <div className="px-3.5 py-3">
+          <div className="text-[11px] font-medium text-slate-500 flex items-center justify-between gap-1">
+            <span>Battery Health</span>
+            {batteryActive && (
+              <span className="font-mono text-[10px] text-slate-400">
+                {config.batteryDegradation.enabled ? 'DoD' : 'Ideal'}
+              </span>
+            )}
+          </div>
+          <div
+            className={`mt-0.5 font-mono tabular-nums text-lg font-bold ${
+              batteryActive ? batteryHealthTone : 'text-slate-400'
+            }`}
+          >
+            {batteryActive ? (
+              <>
+                {summary.batteryHealthPct.toFixed(1)}
+                <span className="text-xs font-normal text-slate-500 ml-0.5">%</span>
+              </>
+            ) : (
+              '—'
+            )}
+          </div>
+          <div className="text-[11px] text-slate-500 font-mono tabular-nums">
+            {batteryActive
+              ? `${summary.effectiveBatteryCapacityKwh.toFixed(2)} / ${config.batteryCapacityKwh.toFixed(1)} kWh · Max DoD ${summary.maxDodPct.toFixed(0)}%`
+              : 'Battery unplugged'}
           </div>
         </div>
 
@@ -257,9 +294,9 @@ export const AnalyticsCharts: React.FC<AnalyticsChartsProps> = ({
           </div>
         </div>
 
-        <div className="px-3.5 py-3 col-span-2 sm:col-span-1">
+        <div className="px-3.5 py-3">
           <div className="text-[11px] font-medium text-slate-500">
-            {isOffGrid ? 'Battery Longevity' : 'Net Cost · Life'}
+            {isOffGrid ? 'Remaining Life' : 'Net Cost · Life'}
           </div>
           <div
             className={`mt-0.5 font-mono tabular-nums text-lg font-bold ${
@@ -443,7 +480,7 @@ export const AnalyticsCharts: React.FC<AnalyticsChartsProps> = ({
             </div>
           )}
 
-          {/* Panel 2: Battery Storage Longevity & Extreme Weather Stress */}
+          {/* Panel 2: Battery Health, DoD Degradation & Longevity */}
           {showLongevity && (
             <div className="p-4 space-y-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
@@ -451,28 +488,41 @@ export const AnalyticsCharts: React.FC<AnalyticsChartsProps> = ({
                   <div className="flex items-center gap-2">
                     <HeartPulse className="w-4 h-4 text-slate-700" />
                     <h3 className="text-sm font-semibold text-slate-900">
-                      Battery Storage Longevity & Extreme Weather Stress
+                      Battery Health, DoD Degradation & Longevity
                     </h3>
                   </div>
                   <p className="text-xs text-slate-500 mt-0.5">
                     {activeExtremeLabels.length > 0
-                      ? `Active stress tests: ${activeExtremeLabels.join(' · ')} — comparing 10-year SoH trajectory against 25°C nominal baseline.`
-                      : 'No extreme weather stress tests active. Toggle Cloudy Streak, Heatwave Spike, Monsoon Squall, or Cold Snap in the Stress tab.'}
+                      ? `Active stress tests: ${activeExtremeLabels.join(' · ')} — storage capacity dynamically adjusted for DoD cycle degradation.`
+                      : 'Depth-of-discharge (DoD) cycle degradation adjusts effective storage capacity and projects 10-year SoH trajectory.'}
                   </p>
                 </div>
 
                 {batteryActive && (
                   <div className="flex flex-wrap items-center gap-4 text-xs font-mono tabular-nums">
                     <div>
-                      <span className="text-slate-500">Cycles/day: </span>
-                      <strong className="text-slate-900">
-                        {summary.equivalentFullCyclesPerDay.toFixed(2)}
+                      <span className="text-slate-500">Battery Health: </span>
+                      <strong className={batteryHealthTone}>
+                        {summary.batteryHealthPct.toFixed(1)}%
                       </strong>
                     </div>
                     <div>
-                      <span className="text-slate-500">Wear Mult: </span>
-                      <strong className={longevityTone}>
-                        {summary.avgThermalStressFactor.toFixed(2)}x
+                      <span className="text-slate-500">Usable Cap: </span>
+                      <strong className="text-slate-900">
+                        {summary.effectiveBatteryCapacityKwh.toFixed(2)} /{' '}
+                        {config.batteryCapacityKwh.toFixed(1)} kWh
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="text-slate-500">Avg/Max DoD: </span>
+                      <strong className="text-slate-900">
+                        {summary.avgDodPct.toFixed(0)}% / {summary.maxDodPct.toFixed(0)}%
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="text-slate-500">Cycles/day: </span>
+                      <strong className="text-slate-900">
+                        {summary.equivalentFullCyclesPerDay.toFixed(2)}
                       </strong>
                     </div>
                     <div>
@@ -489,6 +539,51 @@ export const AnalyticsCharts: React.FC<AnalyticsChartsProps> = ({
                   </div>
                 )}
               </div>
+
+              {batteryActive && (
+                <div className="rounded-lg border border-slate-200 bg-slate-50/75 px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-[220px] flex-1">
+                    <div className="shrink-0">
+                      <div className="text-[11px] font-medium text-slate-500">
+                        Battery Health (SoH)
+                      </div>
+                      <div className={`font-mono tabular-nums text-base font-bold ${batteryHealthTone}`}>
+                        {summary.batteryHealthPct.toFixed(1)}%
+                      </div>
+                    </div>
+                    <div className="flex-1 max-w-xs space-y-1">
+                      <div className="h-2 w-full rounded-full bg-slate-200 overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all ${
+                            summary.batteryHealthPct >= 90
+                              ? 'bg-emerald-600'
+                              : summary.batteryHealthPct >= 80
+                                ? 'bg-amber-500'
+                                : 'bg-rose-600'
+                          }`}
+                          style={{ width: `${Math.max(5, Math.min(100, summary.batteryHealthPct))}%` }}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between text-[10px] font-mono tabular-nums text-slate-500">
+                        <span>Prior Cycles: {config.batteryDegradation.priorCycles.toLocaleString()}</span>
+                        <span>Lost: -{summary.capacityLostKwh.toFixed(2)} kWh</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-4 text-[11px] font-mono tabular-nums text-slate-600">
+                    <span>
+                      Annual Fade: <strong className={longevityTone}>{summary.annualizedFadePct.toFixed(2)}%/yr</strong>
+                    </span>
+                    <span>
+                      Wear Mult: <strong className={longevityTone}>{summary.avgThermalStressFactor.toFixed(2)}x</strong>
+                    </span>
+                    <span>
+                      Rating: <strong className={longevityTone}>{summary.longevityRating}</strong>
+                    </span>
+                  </div>
+                </div>
+              )}
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 <div>

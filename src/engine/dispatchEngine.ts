@@ -461,16 +461,31 @@ export function solveSimulation(rawConfig: SimulationConfig): SimulationResult {
   const chargeEff = Math.sqrt(rtEff);
   const dischargeEff = Math.sqrt(rtEff);
 
-  // Plug-and-play Battery Module + Cold Snap capacity derating
+  // Plug-and-play Battery Module + Cold Snap + DoD Cycle Degradation capacity adjustment
   const nominalBattCap = config.plugModules.batteryEnabled
     ? Math.max(0, config.batteryCapacityKwh)
     : 0;
   const coldDerateFactor = config.stressTests.coldSnap.enabled
     ? 1 - clamp(config.stressTests.coldSnap.capacityDeratePct, 0, 45) / 100
     : 1.0;
-  const battCap = nominalBattCap * coldDerateFactor;
 
-  const minReserveKwh = battCap * (clamp(config.batteryMinReserveSocPct, 0, 90) / 100);
+  const degCfg = config.batteryDegradation;
+  const dodExponent = clamp(degCfg.dodStressExponent, 0.8, 2.5);
+  const baseCycleFadeRate = clamp(degCfg.cycleFadePerFullCyclePct, 0.001, 0.05);
+  const reserveFloorPct = clamp(config.batteryMinReserveSocPct, 0, 90);
+
+  // Compute initial State of Health (Battery Health %) from accumulated DoD cycle history
+  const typicalOperatingDodFrac = clamp((100 - reserveFloorPct) / 100, 0.2, 0.95);
+  const priorDodMultiplier = Math.pow(typicalOperatingDodFrac / 0.5, dodExponent);
+  const priorFadePct =
+    degCfg.enabled && nominalBattCap > 0
+      ? degCfg.priorCycles * baseCycleFadeRate * priorDodMultiplier
+      : 0;
+  let currentBatteryHealthPct =
+    nominalBattCap > 0 ? clamp(100 - priorFadePct, 50, 100) : 100;
+
+  let battCap = nominalBattCap * coldDerateFactor * (currentBatteryHealthPct / 100);
+  let minReserveKwh = battCap * (reserveFloorPct / 100);
   let batteryEnergyKwh = battCap * (clamp(config.batteryInitialSocPct, 0, 100) / 100);
 
   const invRated = Math.max(0.5, config.inverterRatedKw);
@@ -494,11 +509,15 @@ export function solveSimulation(rawConfig: SimulationConfig): SimulationResult {
   let totalBatteryDischargedKwh = 0;
   let minBatterySocPct = battCap > 0 ? (batteryEnergyKwh / battCap) * 100 : 0;
 
-  // Longevity accumulators
+  // Longevity & DoD cycle accumulators
   let peakBatteryCellTempC = 25;
   let thermalStressSum = 0;
   let cumulativeDegradationPct = 0;
   let baselineDegradationPct = 0;
+  let peakSocInCycle = battCap > 0 ? (batteryEnergyKwh / battCap) * 100 : 0;
+  let dodSampleSum = 0;
+  let dodSampleCount = 0;
+  let maxDodPct = 0;
 
   let totalGridImportKwh = 0;
   let totalGridExportKwh = 0;
@@ -528,6 +547,13 @@ export function solveSimulation(rawConfig: SimulationConfig): SimulationResult {
     if (step.isLoadSurge) activeEvents.push('LOAD_SURGE');
     if (step.isPriceSpike) activeEvents.push('PRICE_SPIKE');
     if (step.isPeakTariff) activeEvents.push('PEAK_TARIFF');
+
+    // Dynamically adjust usable battery capacity from live Battery Health (SoH %)
+    battCap = nominalBattCap * coldDerateFactor * (currentBatteryHealthPct / 100);
+    minReserveKwh = battCap * (reserveFloorPct / 100);
+    if (batteryEnergyKwh > battCap) {
+      batteryEnergyKwh = battCap;
+    }
 
     const pvAvailableKw = step.pvRawKw;
     const loadKw = step.loadKw;
@@ -682,14 +708,35 @@ export function solveSimulation(rawConfig: SimulationConfig): SimulationResult {
     thermalStressFactor = round2(clamp(thermalStressFactor, 0.85, 4.5));
     thermalStressSum += thermalStressFactor;
 
-    // Depth-of-discharge & C-rate stress multipliers
-    const dodPenalty = batterySocPct < 22 ? 1.45 : batterySocPct > 96 && batteryCellTempC > 35 ? 1.25 : 1.0;
+    // Nonlinear Depth-of-Discharge (DoD) cycle wear & C-rate stress multipliers
+    const stepDodPct = battCap > 0 ? clamp(100 - batterySocPct, 0, 100) : 0;
+    if (batterySocPct > peakSocInCycle) {
+      peakSocInCycle = batterySocPct;
+    }
+    const swingDodPct = Math.max(0, peakSocInCycle - batterySocPct);
+    const activeDodPct = batteryDischargeKw > 0.02 ? Math.max(stepDodPct, swingDodPct) : stepDodPct;
+    if (battCap > 0 && (batteryChargeKw > 0.02 || batteryDischargeKw > 0.02)) {
+      dodSampleSum += activeDodPct;
+      dodSampleCount += 1;
+    }
+    if (battCap > 0 && activeDodPct > maxDodPct) {
+      maxDodPct = activeDodPct;
+    }
+    if (batteryChargeKw > 0.05 && batterySocPct > peakSocInCycle - 2) {
+      peakSocInCycle = batterySocPct;
+    }
+
+    const effectiveDodFrac = clamp(activeDodPct / 100, 0.15, 1.0);
+    const dodWearMultiplier = Math.pow(effectiveDodFrac / 0.5, dodExponent);
+    const highSocThermalPenalty =
+      batterySocPct > 96 && batteryCellTempC > 35 ? 1.25 : 1.0;
+    const dodPenalty = clamp(dodWearMultiplier * highSocThermalPenalty, 0.35, 3.2);
     const cRatePenalty = cRate > 0.5 ? 1 + (cRate - 0.5) * 0.9 : 1.0;
 
-    // Nominal LiFePO4 baseline: ~1.1% calendar fade/yr + ~0.004% capacity fade per full equivalent cycle (5000 cycles to 80% SoH)
+    // LiFePO4 electrochemical model: calendar fade + DoD-weighted equivalent full cycle fade
     const hourlyEqCycle = battCap > 0 ? (batteryChargeKw + batteryDischargeKw) / (2 * battCap) : 0;
     const baseCalendarPerHour = 0.95 / 8760; // % SoH fade/hr at 25°C
-    const baseCycleFade = hourlyEqCycle * 0.0042; // % SoH fade per equivalent cycle at 25°C
+    const baseCycleFade = hourlyEqCycle * baseCycleFadeRate; // % SoH fade per equivalent cycle at 50% ref DoD
 
     const hourlyBaselineFade = battCap > 0 ? baseCalendarPerHour + baseCycleFade : 0;
     const hourlyStressedFade =
@@ -701,14 +748,18 @@ export function solveSimulation(rawConfig: SimulationConfig): SimulationResult {
     cumulativeDegradationPct += hourlyStressedFade;
     baselineDegradationPct += hourlyBaselineFade;
 
+    if (degCfg.enabled && nominalBattCap > 0) {
+      currentBatteryHealthPct = clamp(currentBatteryHealthPct - hourlyStressedFade, 50, 100);
+    }
+
     // Human-readable Hourly Stress Index (0–100 scale for charting)
     const hourlyWearIndex =
       battCap > 0
         ? round2(
             clamp(
-              (thermalStressFactor - 0.85) * 26 +
-                cRate * 32 +
-                (dodPenalty - 1) * 35 +
+              (thermalStressFactor - 0.85) * 24 +
+                cRate * 30 +
+                Math.max(0, dodPenalty - 1) * 26 +
                 (step.isHeatwave ? 12 : 0) +
                 (step.isColdSnap ? 10 : 0),
               2,
@@ -788,6 +839,9 @@ export function solveSimulation(rawConfig: SimulationConfig): SimulationResult {
       thermalStressFactor,
       hourlyWearIndex,
       cumulativeDegradationPct: Number(cumulativeDegradationPct.toFixed(5)),
+      batteryHealthPct: round2(currentBatteryHealthPct),
+      effectiveBatteryCapKwh: round2(battCap),
+      stepDodPct: round2(stepDodPct),
       gridOnline: step.gridOnline,
       gridImportKw: round2(gridImportKw),
       gridExportKw: round2(gridExportKw),
@@ -817,49 +871,65 @@ export function solveSimulation(rawConfig: SimulationConfig): SimulationResult {
       ? clamp(((totalServedLoadKwh - totalGridImportKwh) / totalLoadKwh) * 100, 0, 100)
       : 0;
 
-  // Annualize battery longevity projections (time to reach 80% SoH EOL threshold = 20% fade)
+  // Annualize battery longevity projections (time from current health to 80% SoH EOL threshold)
   const daysSimulated = config.horizonHours / 24;
+  const finalEffectiveCapKwh =
+    nominalBattCap * coldDerateFactor * (currentBatteryHealthPct / 100);
+  const capacityLostKwh = Math.max(0, nominalBattCap - finalEffectiveCapKwh);
+  const avgDodPct =
+    dodSampleCount > 0
+      ? dodSampleSum / dodSampleCount
+      : battCap > 0
+        ? clamp(100 - minBatterySocPct, 0, 100)
+        : 0;
+
   const equivalentFullCyclesPerDay =
-    battCap > 0
-      ? (totalBatteryChargedKwh + totalBatteryDischargedKwh) / (2 * battCap * daysSimulated)
+    finalEffectiveCapKwh > 0
+      ? (totalBatteryChargedKwh + totalBatteryDischargedKwh) /
+        (2 * finalEffectiveCapKwh * daysSimulated)
       : 0;
   const avgThermalStressFactor =
     steps.length > 0 ? thermalStressSum / steps.length : 1.0;
 
   const annualizedBaselineFadePct =
-    battCap > 0 ? Math.max(0.8, (baselineDegradationPct / daysSimulated) * 365) : 0;
+    finalEffectiveCapKwh > 0 ? Math.max(0.8, (baselineDegradationPct / daysSimulated) * 365) : 0;
   const annualizedStressedFadePct =
-    battCap > 0 ? Math.max(0.8, (cumulativeDegradationPct / daysSimulated) * 365) : 0;
+    finalEffectiveCapKwh > 0 ? Math.max(0.8, (cumulativeDegradationPct / daysSimulated) * 365) : 0;
+
+  const startHealthForProjection =
+    nominalBattCap > 0 ? currentBatteryHealthPct : 100;
+  const remainingMarginToEol = Math.max(0, startHealthForProjection - 80);
 
   const baselineLifespanYears =
-    battCap > 0 ? clamp(20 / annualizedBaselineFadePct, 1.5, 18) : 0;
+    finalEffectiveCapKwh > 0 ? clamp(remainingMarginToEol / annualizedBaselineFadePct, 0, 18) : 0;
   const projectedLifespanYears =
-    battCap > 0 ? clamp(20 / annualizedStressedFadePct, 1.0, 18) : 0;
+    finalEffectiveCapKwh > 0 ? clamp(remainingMarginToEol / annualizedStressedFadePct, 0, 18) : 0;
   const lifespanDeltaYears = round2(projectedLifespanYears - baselineLifespanYears);
 
   const longevityRating: SimulationSummary['longevityRating'] =
-    battCap === 0
+    finalEffectiveCapKwh === 0
       ? 'Optimal'
-      : projectedLifespanYears >= 10
-        ? 'Optimal'
-        : projectedLifespanYears >= 7.5
-          ? 'Moderate Wear'
-          : projectedLifespanYears >= 5
-            ? 'Accelerated Wear'
-            : 'Severe Stress';
+      : currentBatteryHealthPct < 80
+        ? 'Severe Stress'
+        : projectedLifespanYears >= 9
+          ? 'Optimal'
+          : projectedLifespanYears >= 6.5
+            ? 'Moderate Wear'
+            : projectedLifespanYears >= 4
+              ? 'Accelerated Wear'
+              : 'Severe Stress';
 
-  // 10-Year Projected State of Health Curve (Year 0 to Year 10)
+  // 10-Year Projected State of Health Curve (Year 0 = current Battery Health to Year 10)
   const longevityCurve: LongevityProjectionPoint[] = [];
   for (let yr = 0; yr <= 10; yr++) {
-    // Slightly accelerating tail below 82% SoH for realistic knee behavior
     const baseLoss = annualizedBaselineFadePct * yr;
     const stressLoss =
       annualizedStressedFadePct * yr * (yr > 6 && annualizedStressedFadePct > 2.5 ? 1.06 : 1.0);
     longevityCurve.push({
       year: yr,
       yearLabel: `Yr ${yr}`,
-      baselineSohPct: round2(clamp(100 - baseLoss, 50, 100)),
-      stressedSohPct: round2(clamp(100 - stressLoss, 45, 100)),
+      baselineSohPct: round2(clamp(startHealthForProjection - baseLoss, 50, 100)),
+      stressedSohPct: round2(clamp(startHealthForProjection - stressLoss, 45, 100)),
     });
   }
 
@@ -880,6 +950,11 @@ export function solveSimulation(rawConfig: SimulationConfig): SimulationResult {
     minBatterySocPct: round2(minBatterySocPct),
     endBatterySocPct: steps.length > 0 ? steps[steps.length - 1].batterySocPct : 0,
 
+    batteryHealthPct: round2(currentBatteryHealthPct),
+    effectiveBatteryCapacityKwh: round2(finalEffectiveCapKwh),
+    capacityLostKwh: round2(capacityLostKwh),
+    avgDodPct: round2(avgDodPct),
+    maxDodPct: round2(maxDodPct),
     equivalentFullCyclesPerDay: round2(equivalentFullCyclesPerDay),
     peakBatteryCellTempC: round2(peakBatteryCellTempC),
     avgThermalStressFactor: round2(avgThermalStressFactor),
