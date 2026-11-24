@@ -41,7 +41,8 @@ export type StepEventTag =
   | 'GRID_CAP_BREACH'
   | 'UNSERVED_LOAD'
   | 'LOAD_SURGE'
-  | 'PRICE_SPIKE';
+  | 'PRICE_SPIKE'
+  | 'WEATHER_EVENT';
 
 export interface OutageWindow {
   id: string;
@@ -112,6 +113,19 @@ export interface BatteryDegradationConfig {
   priorCycles: number;              // Existing accumulated DoD cycles (0–5000)
   dodStressExponent: number;        // Nonlinear Wöhler DoD exponent (default 1.35)
   cycleFadePerFullCyclePct: number; // Base % SoH fade per 100% equivalent cycle at 50% ref DoD
+}
+
+export type WeatherEventProfile =
+  | 'passing_squall'
+  | 'storm_front'
+  | 'cloud_flicker';
+
+export interface WeatherEventConfig {
+  enabled: boolean;
+  profile: WeatherEventProfile;
+  startHour: number;
+  durationHours: number;
+  solarDropPct: number;
 }
 
 export interface WeatherForecastProfile {
@@ -200,8 +214,9 @@ export interface SimulationConfig {
   // Plug-and-play physical modules
   plugModules: PlugModulesConfig;
 
-  // Extreme weather stress tests
+  // Extreme weather stress tests & rapid solar-drop weather event
   stressTests: ExtremeWeatherStressConfig;
+  weatherEvent: WeatherEventConfig;
 
   // Custom / Library Solar Irradiation Preset & Live Coordinate Weather Forecast
   solarPresetId: string | null;
@@ -282,6 +297,7 @@ export interface HourlyInputStep {
   isColdSnap: boolean;
   isLoadSurge: boolean;
   isPriceSpike: boolean;
+  isWeatherEvent: boolean;
   outageLabel: string | null;
 }
 

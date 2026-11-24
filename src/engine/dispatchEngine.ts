@@ -9,6 +9,7 @@ import type {
   SimulationResult,
   SimulationSummary,
   StepEventTag,
+  WeatherEventConfig,
 } from '../types/simulation';
 import { normalizeConfig } from './presets';
 import { calculatePvOutputKw } from './solarPanels';
@@ -100,6 +101,40 @@ function computeSolarMultiplier(
   }
 
   return { mult, isMonsoonDrop };
+}
+
+function computeWeatherEventSolarFactor(
+  weatherEvent: WeatherEventConfig,
+  hourIndex: number
+): { factor: number; active: boolean } {
+  if (!weatherEvent.enabled) {
+    return { factor: 1.0, active: false };
+  }
+  const start = Math.max(0, Math.round(weatherEvent.startHour));
+  const duration = Math.max(1, Math.round(weatherEvent.durationHours));
+  if (hourIndex < start || hourIndex >= start + duration) {
+    return { factor: 1.0, active: false };
+  }
+
+  const dropFrac = clamp(weatherEvent.solarDropPct, 20, 95) / 100;
+  const offset = hourIndex - start;
+
+  if (weatherEvent.profile === 'cloud_flicker') {
+    // Rapid ramp-rate oscillation: sharp plunge on even hours, partial rebound on odd hours
+    const effectiveDrop = offset % 2 === 0 ? dropFrac : dropFrac * 0.35;
+    return { factor: clamp(1 - effectiveDrop, 0.04, 1.0), active: true };
+  }
+
+  if (weatherEvent.profile === 'passing_squall') {
+    // Steepest solar cliff at core of squall
+    const mid = (duration - 1) / 2;
+    const isCore = Math.abs(offset - mid) <= 0.6;
+    const effectiveDrop = isCore ? Math.min(0.96, dropFrac * 1.04) : dropFrac * 0.94;
+    return { factor: clamp(1 - effectiveDrop, 0.04, 1.0), active: true };
+  }
+
+  // storm_front: sustained deep solar drop across the full window
+  return { factor: clamp(1 - dropFrac, 0.05, 1.0), active: true };
 }
 
 function computeAmbientTempC(hourOfDay: number, config: SimulationConfig): {
@@ -216,6 +251,12 @@ export function generateParametricInputs(rawConfig: SimulationConfig): HourlyInp
       isMonsoonSquall = true;
     }
 
+    // Rapid Solar-Drop Weather Event (ControlSidebar quick resilience toggle)
+    const weatherDrop = computeWeatherEventSolarFactor(config.weatherEvent, h);
+    if (weatherDrop.active) {
+      irradianceWm2 *= weatherDrop.factor;
+    }
+
     // Apply Site Shadow Factor Reduction Coefficient (trees / structures)
     const shadowCoeff = getHourlyShadowCoefficient(config.shadowConfig, hourOfDay);
     irradianceWm2 = Math.round(clamp(irradianceWm2 * shadowCoeff, 0, 1400));
@@ -325,6 +366,7 @@ export function generateParametricInputs(rawConfig: SimulationConfig): HourlyInp
       isColdSnap,
       isLoadSurge,
       isPriceSpike,
+      isWeatherEvent: weatherDrop.active,
       outageLabel,
     });
   }
@@ -410,8 +452,11 @@ function resolveInputSteps(config: SimulationConfig): HourlyInputStep[] {
       isHourInPeak(hourOfDay, config.peakStartHour, config.peakEndHour);
     const gridOnline = config.plugModules.gridEnabled && Boolean(row.gridOnline);
     const rawIrradianceWm2 = Math.round(clamp(Number(row.irradianceWm2) || 0, 0, 1400));
+    const weatherDrop = computeWeatherEventSolarFactor(config.weatherEvent, idx);
     const shadowCoeff = getHourlyShadowCoefficient(config.shadowConfig, hourOfDay);
-    const irradianceWm2 = Math.round(clamp(rawIrradianceWm2 * shadowCoeff, 0, 1400));
+    const irradianceWm2 = Math.round(
+      clamp(rawIrradianceWm2 * weatherDrop.factor * shadowCoeff, 0, 1400)
+    );
 
     // Dynamically calculate PV output from irradiance + installed solar capacity + selected panel specs
     const panelCalc = calculatePvOutputKw({
@@ -443,6 +488,7 @@ function resolveInputSteps(config: SimulationConfig): HourlyInputStep[] {
       isColdSnap: ambientCalc.isColdSnap,
       isLoadSurge: false,
       isPriceSpike: false,
+      isWeatherEvent: weatherDrop.active,
       outageLabel: !config.plugModules.gridEnabled
         ? 'Grid Module Unplugged (Off-Grid)'
         : row.gridOnline
@@ -546,6 +592,7 @@ export function solveSimulation(rawConfig: SimulationConfig): SimulationResult {
     if (step.isColdSnap) activeEvents.push('COLD_SNAP');
     if (step.isLoadSurge) activeEvents.push('LOAD_SURGE');
     if (step.isPriceSpike) activeEvents.push('PRICE_SPIKE');
+    if (step.isWeatherEvent) activeEvents.push('WEATHER_EVENT');
     if (step.isPeakTariff) activeEvents.push('PEAK_TARIFF');
 
     // Dynamically adjust usable battery capacity from live Battery Health (SoH %)

@@ -4,6 +4,7 @@ import {
   BatteryCharging,
   ChevronLeft,
   ChevronRight,
+  CloudLightning,
   Flame,
   Home,
   Pause,
@@ -108,6 +109,13 @@ export const PowerFlowSchematic: React.FC<PowerFlowSchematicProps> = ({
         label: `Heatwave Thermal Stress (${step.batteryCellTempC.toFixed(1)}°C Cell)`,
         toneClass: 'text-rose-400',
         Icon: Flame,
+      };
+    }
+    if (step.activeEvents.includes('WEATHER_EVENT')) {
+      return {
+        label: `Weather Event · Solar Drop (-${config.weatherEvent.solarDropPct}%)`,
+        toneClass: 'text-cyan-400',
+        Icon: CloudLightning,
       };
     }
     if (step.activeEvents.includes('PEAK_SHAVING')) {

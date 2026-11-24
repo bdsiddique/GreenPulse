@@ -219,11 +219,13 @@ export const TimelineScrubber: React.FC<TimelineScrubberProps> = ({
                 ? 'bg-rose-500/25'
                 : !s.gridOnline
                   ? 'bg-amber-500/18'
-                  : s.activeEvents.includes('HEATWAVE_SPIKE')
-                    ? 'bg-orange-500/10'
-                    : s.activeEvents.includes('PEAK_TARIFF')
-                      ? 'bg-indigo-500/10'
-                      : 'bg-transparent';
+                  : s.activeEvents.includes('WEATHER_EVENT')
+                    ? 'bg-cyan-500/20'
+                    : s.activeEvents.includes('HEATWAVE_SPIKE')
+                      ? 'bg-orange-500/10'
+                      : s.activeEvents.includes('PEAK_TARIFF')
+                        ? 'bg-indigo-500/10'
+                        : 'bg-transparent';
             return (
               <div
                 key={s.hour}

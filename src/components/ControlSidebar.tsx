@@ -2,11 +2,16 @@ import React, { useMemo } from 'react';
 import {
   ArrowUpRight,
   BatteryCharging,
+  CloudLightning,
   Power,
   Sun,
   UtilityPole,
 } from 'lucide-react';
-import type { PlugModulesConfig, SimulationSummary } from '../types/simulation';
+import type {
+  PlugModulesConfig,
+  SimulationSummary,
+  WeatherEventProfile,
+} from '../types/simulation';
 import { BUILTIN_SOLAR_PRESETS } from '../engine/solarPresets';
 import {
   type SandboxPanelId,
@@ -16,6 +21,37 @@ import { StressTestsPanel } from './modules/StressTestsPanel';
 import { AssetsModule } from './modules/AssetsModule';
 import { LoadModule } from './modules/LoadModule';
 import { GridModule } from './modules/GridModule';
+import { NumericInputField } from './ui/NumericInputField';
+
+const WEATHER_EVENT_PROFILES: Array<{
+  id: WeatherEventProfile;
+  label: string;
+  startHour: number;
+  durationHours: number;
+  solarDropPct: number;
+}> = [
+  {
+    id: 'passing_squall',
+    label: 'Squall -82%',
+    startHour: 11,
+    durationHours: 3,
+    solarDropPct: 82,
+  },
+  {
+    id: 'storm_front',
+    label: 'Front -70%',
+    startHour: 10,
+    durationHours: 5,
+    solarDropPct: 70,
+  },
+  {
+    id: 'cloud_flicker',
+    label: 'Cloud Ramp',
+    startHour: 9,
+    durationHours: 6,
+    solarDropPct: 78,
+  },
+];
 
 interface ControlSidebarProps {
   summary: SimulationSummary;
@@ -28,9 +64,12 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({ summary }) => {
     activeSidebarTab,
     setActiveSidebarTab,
     togglePlugModule,
+    updateConfig,
     applySolarPresetToSimulation,
     clearSolarPreset,
     clearAppliedWeatherForecast,
+    setSelectedHour,
+    setIsPlaying,
     setActiveTab,
     setLibraryTab,
   } = useSimulationStore();
@@ -40,12 +79,41 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({ summary }) => {
     [customSolarPresets]
   );
 
+  const weatherEvent = config.weatherEvent;
   const activeStressCount = [
     config.stressTests.cloudyStreak.enabled,
     config.stressTests.heatwaveSpike.enabled,
     config.stressTests.monsoonSquall.enabled,
     config.stressTests.coldSnap.enabled,
   ].filter(Boolean).length;
+
+  const handleToggleWeatherEvent = () => {
+    const nextEnabled = !weatherEvent.enabled;
+    updateConfig({
+      weatherEvent: {
+        ...weatherEvent,
+        enabled: nextEnabled,
+      },
+    });
+    if (nextEnabled) {
+      setIsPlaying(false);
+      setSelectedHour(Math.min(config.horizonHours - 1, weatherEvent.startHour));
+    }
+  };
+
+  const handleSelectWeatherProfile = (preset: (typeof WEATHER_EVENT_PROFILES)[number]) => {
+    updateConfig({
+      weatherEvent: {
+        enabled: true,
+        profile: preset.id,
+        startHour: preset.startHour,
+        durationHours: preset.durationHours,
+        solarDropPct: preset.solarDropPct,
+      },
+    });
+    setIsPlaying(false);
+    setSelectedHour(Math.min(config.horizonHours - 1, preset.startHour));
+  };
 
   const hardwareModules: Array<{
     key: keyof PlugModulesConfig;
@@ -187,6 +255,151 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({ summary }) => {
                 >
                   Clear
                 </button>
+              </div>
+            )}
+          </div>
+
+          {/* Rapid Solar-Drop Weather Event Resilience Toggle */}
+          <div className="pt-2.5 border-t border-slate-200 space-y-2">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-start gap-1.5 min-w-0">
+                <CloudLightning
+                  className={`w-3.5 h-3.5 mt-0.5 shrink-0 ${
+                    weatherEvent.enabled ? 'text-amber-600' : 'text-slate-400'
+                  }`}
+                />
+                <div className="min-w-0">
+                  <div className="text-xs font-semibold text-slate-900 leading-tight">
+                    Weather Event
+                  </div>
+                  <div className="text-[11px] text-slate-500 leading-snug">
+                    Simulate rapid solar output drop to test grid resilience
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                role="switch"
+                aria-checked={weatherEvent.enabled}
+                aria-label="Toggle rapid solar drop weather event"
+                onClick={handleToggleWeatherEvent}
+                className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900 focus-visible:ring-offset-1 ${
+                  weatherEvent.enabled ? 'bg-amber-600' : 'bg-slate-300'
+                }`}
+              >
+                <span
+                  className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                    weatherEvent.enabled ? 'translate-x-4.5' : 'translate-x-0.5'
+                  }`}
+                />
+              </button>
+            </div>
+
+            {weatherEvent.enabled && (
+              <div className="space-y-2 pt-0.5">
+                <div
+                  role="group"
+                  aria-label="Weather event profile"
+                  className="grid grid-cols-3 gap-1"
+                >
+                  {WEATHER_EVENT_PROFILES.map((preset) => {
+                    const active = weatherEvent.profile === preset.id;
+                    return (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        onClick={() => handleSelectWeatherProfile(preset)}
+                        className={`px-1.5 py-1 rounded-md text-[10px] font-semibold font-mono tabular-nums whitespace-nowrap transition-colors ${
+                          active
+                            ? 'bg-slate-900 text-white'
+                            : 'bg-white border border-slate-200 text-slate-600 hover:border-slate-400'
+                        }`}
+                      >
+                        {preset.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="grid grid-cols-3 gap-1.5">
+                  <NumericInputField
+                    label="Start Hr"
+                    value={weatherEvent.startHour}
+                    unit="h"
+                    min={0}
+                    max={config.horizonHours - 1}
+                    step={1}
+                    onChange={(v) =>
+                      updateConfig({
+                        weatherEvent: {
+                          ...weatherEvent,
+                          startHour: Math.round(v),
+                        },
+                      })
+                    }
+                  />
+                  <NumericInputField
+                    label="Duration"
+                    value={weatherEvent.durationHours}
+                    unit="h"
+                    min={1}
+                    max={Math.min(24, config.horizonHours)}
+                    step={1}
+                    onChange={(v) =>
+                      updateConfig({
+                        weatherEvent: {
+                          ...weatherEvent,
+                          durationHours: Math.round(v),
+                        },
+                      })
+                    }
+                  />
+                  <NumericInputField
+                    label="Solar Drop"
+                    value={weatherEvent.solarDropPct}
+                    unit="%"
+                    min={20}
+                    max={95}
+                    step={5}
+                    onChange={(v) =>
+                      updateConfig({
+                        weatherEvent: {
+                          ...weatherEvent,
+                          solarDropPct: Math.round(v),
+                        },
+                      })
+                    }
+                  />
+                </div>
+
+                <div className="flex items-center justify-between gap-2 pt-0.5 text-[11px] font-mono tabular-nums">
+                  <span
+                    className={
+                      summary.gridCapBreachHours > 0 || summary.totalUnservedLoadKwh > 0.05
+                        ? 'text-rose-700 font-semibold'
+                        : 'text-emerald-700 font-medium'
+                    }
+                  >
+                    {summary.gridCapBreachHours > 0
+                      ? `Cap Breach ${summary.gridCapBreachHours}h (+${summary.maxGridCapOvershootKw.toFixed(1)} kW)`
+                      : summary.totalUnservedLoadKwh > 0.05
+                        ? `Unserved ${summary.totalUnservedLoadKwh.toFixed(1)} kWh`
+                        : `Peak Grid ${summary.peakGridImportKw.toFixed(2)} / ${summary.permittedGridPeakKw.toFixed(1)} kW`}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsPlaying(false);
+                      setSelectedHour(
+                        Math.min(config.horizonHours - 1, weatherEvent.startHour)
+                      );
+                    }}
+                    className="text-[11px] font-sans font-medium text-slate-700 hover:text-slate-950 underline whitespace-nowrap shrink-0"
+                  >
+                    Inspect Hr {weatherEvent.startHour}
+                  </button>
+                </div>
               </div>
             )}
           </div>

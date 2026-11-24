@@ -7,6 +7,8 @@ import type {
   ScenarioId,
   SimulationConfig,
   WeatherCityOption,
+  WeatherEventConfig,
+  WeatherEventProfile,
 } from '../types/simulation';
 import { CURRENCIES } from './currencies';
 import { BUILTIN_SOLAR_PRESETS, normalizeSolarPreset } from './solarPresets';
@@ -36,6 +38,16 @@ export function createDefaultBatteryDegradation(): BatteryDegradationConfig {
     priorCycles: 300,
     dodStressExponent: 1.35,
     cycleFadePerFullCyclePct: 0.0045,
+  };
+}
+
+export function createDefaultWeatherEvent(): WeatherEventConfig {
+  return {
+    enabled: false,
+    profile: 'passing_squall',
+    startHour: 11,
+    durationHours: 3,
+    solarDropPct: 82,
   };
 }
 
@@ -91,6 +103,7 @@ export function createDefaultConfig(currency: CurrencyCode = 'BDT'): SimulationC
 
     plugModules: createDefaultPlugModules(),
     stressTests: createDefaultStressTests(),
+    weatherEvent: createDefaultWeatherEvent(),
 
     solarPresetId: defaultSolar.id,
     solarPresetSnapshot: defaultSolar,
@@ -179,6 +192,27 @@ export function normalizeConfig(raw: Partial<SimulationConfig>): SimulationConfi
     plugModules: {
       ...base.plugModules,
       ...(raw.plugModules || {}),
+    },
+    weatherEvent: {
+      ...base.weatherEvent,
+      ...(raw.weatherEvent || {}),
+      profile: (['passing_squall', 'storm_front', 'cloud_flicker'] as WeatherEventProfile[]).includes(
+        raw.weatherEvent?.profile as WeatherEventProfile
+      )
+        ? (raw.weatherEvent?.profile as WeatherEventProfile)
+        : base.weatherEvent.profile,
+      startHour: Math.max(
+        0,
+        Math.min(71, Math.round(Number(raw.weatherEvent?.startHour ?? base.weatherEvent.startHour) || 0))
+      ),
+      durationHours: Math.max(
+        1,
+        Math.min(24, Math.round(Number(raw.weatherEvent?.durationHours ?? base.weatherEvent.durationHours) || 3))
+      ),
+      solarDropPct: Math.max(
+        20,
+        Math.min(95, Math.round(Number(raw.weatherEvent?.solarDropPct ?? base.weatherEvent.solarDropPct) || 82))
+      ),
     },
     stressTests: {
       cloudyStreak: {
