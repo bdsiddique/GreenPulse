@@ -105,6 +105,7 @@ interface StoredUserProfile {
 interface AppSettingsRow {
   id: number;
   app_name: string;
+  app_icon?: string;
   user_profile_json: string;
   updated_at: string;
 }
@@ -128,6 +129,33 @@ interface PasswordResetRow {
 }
 
 const DEFAULT_APP_NAME = 'GreenPulse';
+const DEFAULT_APP_ICON = '/assets/aistudio/bdtpower-logo_21164a7b.png';
+const MAX_APP_ICON_CHARS = 400_000;
+const LOCAL_ASSET_ICON_RE = /^\/assets\/aistudio\/[a-zA-Z0-9._-]+\.(png|jpe?g|webp)$/;
+const RASTER_DATA_URI_RE =
+  /^data:image\/(png|jpeg|webp|x-icon|vnd\.microsoft\.icon);base64,[A-Za-z0-9+/]+=*$/;
+
+function validateAppIcon(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed.length > MAX_APP_ICON_CHARS) return null;
+  if (trimmed.includes('..')) return null;
+  if (LOCAL_ASSET_ICON_RE.test(trimmed) || RASTER_DATA_URI_RE.test(trimmed)) {
+    return trimmed;
+  }
+  return null;
+}
+
+// Safely migrate existing app_settings table to include app_icon column
+const appSettingsCols = db
+  .prepare('PRAGMA table_info(app_settings)')
+  .all() as Array<{ name: string }>;
+if (!appSettingsCols.some((c) => c.name === 'app_icon')) {
+  db.exec(
+    `ALTER TABLE app_settings ADD COLUMN app_icon TEXT NOT NULL DEFAULT '/assets/aistudio/bdtpower-logo_21164a7b.png'`
+  );
+}
+
 const DEFAULT_USER_PROFILE: StoredUserProfile = {
   name: 'Tariq Siddique',
   role: 'Lead Power Systems Engineer',
@@ -138,14 +166,19 @@ const DEFAULT_USER_PROFILE: StoredUserProfile = {
 
 // Seed default workspace identity once (and migrate legacy untouched GridPulse default to GreenPulse)
 const existingSettings = db
-  .prepare('SELECT id, app_name, user_profile_json FROM app_settings WHERE id = 1')
-  .get() as { id: number; app_name: string; user_profile_json: string } | undefined;
+  .prepare('SELECT id, app_name, app_icon, user_profile_json FROM app_settings WHERE id = 1')
+  .get() as { id: number; app_name: string; app_icon?: string; user_profile_json: string } | undefined;
 
 if (!existingSettings) {
   db.prepare(
-    `INSERT INTO app_settings (id, app_name, user_profile_json, updated_at)
-     VALUES (1, ?, ?, ?)`
-  ).run(DEFAULT_APP_NAME, JSON.stringify(DEFAULT_USER_PROFILE), new Date().toISOString());
+    `INSERT INTO app_settings (id, app_name, app_icon, user_profile_json, updated_at)
+     VALUES (1, ?, ?, ?, ?)`
+  ).run(
+    DEFAULT_APP_NAME,
+    DEFAULT_APP_ICON,
+    JSON.stringify(DEFAULT_USER_PROFILE),
+    new Date().toISOString()
+  );
 } else if (existingSettings.app_name === 'GridPulse') {
   let nextProfileJson = existingSettings.user_profile_json;
   try {
@@ -323,13 +356,21 @@ function isSmtpConfigured(): boolean {
   return Boolean(cfg.host && Number.isFinite(cfg.port) && cfg.port > 0 && cfg.from && cfg.user && cfg.pass);
 }
 
-function readAppSettings(): { appName: string; userProfile: StoredUserProfile } {
+function readAppSettings(): {
+  appName: string;
+  appIcon: string;
+  userProfile: StoredUserProfile;
+} {
   const row = db
     .prepare('SELECT * FROM app_settings WHERE id = 1')
     .get() as AppSettingsRow | undefined;
 
   if (!row) {
-    return { appName: DEFAULT_APP_NAME, userProfile: { ...DEFAULT_USER_PROFILE } };
+    return {
+      appName: DEFAULT_APP_NAME,
+      appIcon: DEFAULT_APP_ICON,
+      userProfile: { ...DEFAULT_USER_PROFILE },
+    };
   }
 
   let parsedProfile: Partial<StoredUserProfile> = {};
@@ -339,8 +380,11 @@ function readAppSettings(): { appName: string; userProfile: StoredUserProfile } 
     parsedProfile = {};
   }
 
+  const validIcon = validateAppIcon(row.app_icon) || DEFAULT_APP_ICON;
+
   return {
     appName: row.app_name || DEFAULT_APP_NAME,
+    appIcon: validIcon,
     userProfile: {
       name: sanitizeText(parsedProfile.name, 80) || DEFAULT_USER_PROFILE.name,
       role: sanitizeText(parsedProfile.role, 80) || DEFAULT_USER_PROFILE.role,
@@ -470,6 +514,7 @@ async function startServer() {
       const settings = readAppSettings();
       res.json({
         appName: settings.appName,
+        appIcon: settings.appIcon,
         userProfile: settings.userProfile,
         status: buildAdminStatus(req),
       });
@@ -541,6 +586,7 @@ async function startServer() {
       res.status(201).json({
         token,
         appName: updated.appName,
+        appIcon: updated.appIcon,
         userProfile: updated.userProfile,
         status: {
           ...buildAdminStatus(req),
@@ -607,16 +653,29 @@ async function startServer() {
     res.json({ ok: true });
   });
 
-  // Update protected App Name & User Details (strictly requires verified Admin Bearer token)
+  // Update protected App Name, App Icon & User Details (strictly requires verified Admin Bearer token)
   app.put('/api/admin/settings', requireAdminAuth, (req, res) => {
     try {
       const current = readAppSettings();
       const nextAppName = sanitizeText(req.body?.appName, 60);
+      const rawIcon = req.body?.appIcon;
       const rawProfile = req.body?.userProfile;
 
       if (!nextAppName || nextAppName.length < 2) {
         res.status(400).json({ error: 'App name must be between 2 and 60 characters.' });
         return;
+      }
+
+      let nextAppIcon = current.appIcon;
+      if (rawIcon !== undefined) {
+        const validated = validateAppIcon(rawIcon);
+        if (!validated) {
+          res.status(400).json({
+            error: 'App icon must be a valid PNG, JPG, WebP, or ICO image under 300 KB.',
+          });
+          return;
+        }
+        nextAppIcon = validated;
       }
 
       if (!rawProfile || typeof rawProfile !== 'object') {
@@ -652,9 +711,9 @@ async function startServer() {
       const saveTx = db.transaction(() => {
         db.prepare(
           `UPDATE app_settings
-           SET app_name = ?, user_profile_json = ?, updated_at = ?
+           SET app_name = ?, app_icon = ?, user_profile_json = ?, updated_at = ?
            WHERE id = 1`
-        ).run(nextAppName, JSON.stringify(nextProfile), now);
+        ).run(nextAppName, nextAppIcon, JSON.stringify(nextProfile), now);
 
         db.prepare(
           `UPDATE admin_credentials
@@ -666,6 +725,7 @@ async function startServer() {
 
       res.json({
         appName: nextAppName,
+        appIcon: nextAppIcon,
         userProfile: nextProfile,
         status: buildAdminStatus(req),
       });

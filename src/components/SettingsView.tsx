@@ -3,6 +3,7 @@ import {
   Check,
   Database,
   Download,
+  Image as ImageIcon,
   KeyRound,
   Lock,
   Mail,
@@ -21,7 +22,11 @@ import type {
   SolarPanelTechnology,
 } from '../types/simulation';
 import { CURRENCIES, CURRENCY_LIST, formatRate } from '../engine/currencies';
-import { useSimulationStore } from '../store/useSimulationStore';
+import {
+  DEFAULT_APP_ICON,
+  sanitizeIconSrc,
+  useSimulationStore,
+} from '../store/useSimulationStore';
 import { ShadowFactorCalculator } from './ShadowFactorCalculator';
 
 const PANEL_TECHNOLOGIES: SolarPanelTechnology[] = [
@@ -36,6 +41,7 @@ export const SettingsView: React.FC = () => {
   const {
     config,
     appName,
+    appIcon,
     userProfile,
     adminStatus,
     fetchAdminSettings,
@@ -62,8 +68,9 @@ export const SettingsView: React.FC = () => {
     showToast,
   } = useSimulationStore();
 
-  // Protected App Name & Engineer Profile draft state
+  // Protected App Name, Icon & Engineer Profile draft state
   const [appNameDraft, setAppNameDraft] = useState(appName);
+  const [appIconDraft, setAppIconDraft] = useState(appIcon);
   const [name, setName] = useState(userProfile.name);
   const [role, setRole] = useState(userProfile.role);
   const [organization, setOrganization] = useState(userProfile.organization);
@@ -93,6 +100,7 @@ export const SettingsView: React.FC = () => {
   const [confirmClear, setConfirmClear] = useState(false);
   const [importError, setImportError] = useState('');
   const importRef = useRef<HTMLInputElement>(null);
+  const iconUploadRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     fetchAdminSettings();
@@ -100,12 +108,13 @@ export const SettingsView: React.FC = () => {
 
   useEffect(() => {
     setAppNameDraft(appName);
+    setAppIconDraft(appIcon);
     setName(userProfile.name);
     setRole(userProfile.role);
     setOrganization(userProfile.organization);
     setEmail(userProfile.email);
     setSetupEmail(userProfile.email);
-  }, [appName, userProfile.name, userProfile.role, userProfile.organization, userProfile.email]);
+  }, [appName, appIcon, userProfile.name, userProfile.role, userProfile.organization, userProfile.email]);
 
   // Solar panel editor state
   const [editingPanelId, setEditingPanelId] = useState<string>(config.solarPanelId);
@@ -186,6 +195,83 @@ export const SettingsView: React.FC = () => {
     setShowForgotFlow(false);
   };
 
+  const handleAppIconFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setAuthError('');
+    setAuthNotice('');
+
+    const allowedTypes = new Set([
+      'image/png',
+      'image/jpeg',
+      'image/webp',
+      'image/x-icon',
+      'image/vnd.microsoft.icon',
+    ]);
+    if (!allowedTypes.has(file.type)) {
+      setAuthError('Please choose a PNG, JPG, WebP, or ICO image file.');
+      return;
+    }
+    if (file.size > 4 * 1024 * 1024) {
+      setAuthError('Icon file is too large (maximum 4 MB before resizing).');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const rawDataUrl = typeof reader.result === 'string' ? reader.result : '';
+      if (!rawDataUrl) {
+        setAuthError('Could not read the selected image file.');
+        return;
+      }
+
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const maxDim = 256;
+          const scale = Math.min(1, maxDim / Math.max(img.width || 1, img.height || 1));
+          const targetW = Math.max(1, Math.round((img.width || maxDim) * scale));
+          const targetH = Math.max(1, Math.round((img.height || maxDim) * scale));
+          const canvas = document.createElement('canvas');
+          canvas.width = targetW;
+          canvas.height = targetH;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            setAuthError('Browser canvas unavailable for image processing.');
+            return;
+          }
+          ctx.clearRect(0, 0, targetW, targetH);
+          ctx.drawImage(img, 0, 0, targetW, targetH);
+          const pngDataUrl = canvas.toDataURL('image/png');
+          if (pngDataUrl.length > 400_000) {
+            setAuthError('Processed icon exceeds size limit. Please choose a simpler image.');
+            return;
+          }
+          setAppIconDraft(pngDataUrl);
+          setAuthNotice('Icon staged. Click "Save App Identity & Profile" to apply.');
+        } catch {
+          setAuthError('Could not process the selected icon image.');
+        }
+      };
+      img.onerror = () => {
+        // Fallback for valid small .ico files that some browsers do not decode onto canvas
+        const safeDirect = sanitizeIconSrc(rawDataUrl);
+        if (safeDirect === rawDataUrl) {
+          setAppIconDraft(safeDirect);
+          setAuthNotice('Icon staged. Click "Save App Identity & Profile" to apply.');
+        } else {
+          setAuthError('Selected file could not be decoded as a supported icon image.');
+        }
+      };
+      img.src = rawDataUrl;
+    };
+    reader.onerror = () => {
+      setAuthError('Failed to read the selected icon file.');
+    };
+    reader.readAsDataURL(file);
+  };
+
   const handleSaveProtectedIdentity = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError('');
@@ -193,6 +279,7 @@ export const SettingsView: React.FC = () => {
     setIsAuthBusy(true);
     const result = await saveProtectedIdentity({
       appName: appNameDraft.trim() || appName,
+      appIcon: appIconDraft,
       userProfile: {
         name: name.trim() || userProfile.name,
         role: role.trim() || userProfile.role,
@@ -205,7 +292,7 @@ export const SettingsView: React.FC = () => {
       setAuthError(result.error || 'Failed to save protected settings.');
       return;
     }
-    setAuthNotice('App Name and engineer details saved.');
+    setAuthNotice('App Name, icon, and engineer details saved.');
   };
 
   const handleChangePassword = async (e: React.FormEvent) => {
@@ -744,7 +831,7 @@ export const SettingsView: React.FC = () => {
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="flex items-start gap-2.5">
             <img
-              src="/assets/aistudio/bdtpower-logo_21164a7b.png"
+              src={sanitizeIconSrc(adminStatus.authenticated ? appIconDraft : appIcon)}
               alt={`${appName} logo`}
               referrerPolicy="no-referrer"
               className="w-9 h-9 object-contain shrink-0 rounded-md border border-slate-200 bg-white p-0.5"
@@ -759,7 +846,7 @@ export const SettingsView: React.FC = () => {
                 <span>App Identity & Engineer Profile</span>
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">
-                Changing the application name or engineer details requires an admin password.
+                Changing the application name, icon, or engineer details requires an admin password.
               </p>
             </div>
           </div>
@@ -1073,6 +1160,61 @@ export const SettingsView: React.FC = () => {
               onSubmit={handleSaveProtectedIdentity}
               className="grid grid-cols-1 sm:grid-cols-2 gap-3.5"
             >
+              {/* Application Icon Uploader & Preview */}
+              <div className="sm:col-span-2 rounded-lg border border-slate-200 bg-slate-50/70 p-3.5 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-14 h-14 rounded-lg border border-slate-200 bg-white p-1.5 flex items-center justify-center shrink-0">
+                    <img
+                      src={sanitizeIconSrc(appIconDraft)}
+                      alt={`${appNameDraft || appName} icon preview`}
+                      referrerPolicy="no-referrer"
+                      className="w-full h-full object-contain"
+                    />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-xs font-semibold text-slate-900 flex items-center gap-1.5">
+                      <ImageIcon className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                      <span>Application Icon (Top Bar & Browser Favicon)</span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      PNG, JPG, WebP, or ICO (auto-resized to 256×256 PNG). Click Save to apply workspace-wide.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => iconUploadRef.current?.click()}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-slate-300 bg-white hover:bg-slate-50 text-xs font-medium text-slate-800 whitespace-nowrap transition-colors"
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>Upload Icon</span>
+                  </button>
+                  {appIconDraft !== DEFAULT_APP_ICON && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAppIconDraft(DEFAULT_APP_ICON);
+                        setAuthError('');
+                        setAuthNotice('Default icon staged. Click "Save App Identity & Profile" to apply.');
+                      }}
+                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md border border-slate-200 bg-white hover:bg-slate-100 text-xs font-medium text-slate-600 whitespace-nowrap transition-colors"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span>Reset Default</span>
+                    </button>
+                  )}
+                  <input
+                    ref={iconUploadRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,image/x-icon,.ico"
+                    onChange={handleAppIconFileChange}
+                    className="hidden"
+                  />
+                </div>
+              </div>
+
               <label className="sm:col-span-2 block text-xs text-slate-700 font-medium">
                 Application Name (Top Menu Bar & Browser Title)
                 <input
@@ -1154,7 +1296,7 @@ export const SettingsView: React.FC = () => {
                   disabled={isAuthBusy}
                   className="px-4 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-xs font-semibold transition-colors"
                 >
-                  {isAuthBusy ? 'Saving...' : 'Save App Name & Profile'}
+                  {isAuthBusy ? 'Saving...' : 'Save App Identity & Profile'}
                 </button>
               </div>
             </form>

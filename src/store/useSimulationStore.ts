@@ -61,6 +61,23 @@ const LS_SCENARIO_PROFILES_KEY = 'gridpulse_scenario_profiles_v1';
 
 const LS_LOCATION_CITY_KEY = 'gridpulse_weather_city_v1';
 const DEFAULT_APP_NAME = 'GreenPulse';
+export const DEFAULT_APP_ICON = '/assets/aistudio/bdtpower-logo_21164a7b.png';
+
+const LOCAL_ASSET_ICON_RE = /^\/assets\/aistudio\/[a-zA-Z0-9._-]+\.(png|jpe?g|webp)$/;
+const RASTER_DATA_URI_RE =
+  /^data:image\/(png|jpeg|webp|x-icon|vnd\.microsoft\.icon);base64,[A-Za-z0-9+/]+=*$/;
+
+export function sanitizeIconSrc(raw: unknown): string {
+  if (typeof raw !== 'string') return DEFAULT_APP_ICON;
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed.length > 400_000 || trimmed.includes('..')) {
+    return DEFAULT_APP_ICON;
+  }
+  if (LOCAL_ASSET_ICON_RE.test(trimmed) || RASTER_DATA_URI_RE.test(trimmed)) {
+    return trimmed;
+  }
+  return DEFAULT_APP_ICON;
+}
 
 const DEFAULT_PROFILE: UserProfile = {
   name: 'Tariq Siddique',
@@ -292,6 +309,7 @@ interface SimulationStoreState {
   appliances: ApplianceItem[];
 
   appName: string;
+  appIcon: string;
   userProfile: UserProfile;
   adminStatus: AdminStatus;
   adminToken: string | null; // Held strictly in JS/React memory (never persisted to browser storage)
@@ -414,6 +432,7 @@ interface SimulationStoreState {
   logoutAdmin: () => Promise<void>;
   saveProtectedIdentity: (payload: {
     appName: string;
+    appIcon?: string;
     userProfile: Omit<UserProfile, 'locationCity'>;
   }) => Promise<AdminActionResult>;
   changeAdminPassword: (currentPassword: string, newPassword: string) => Promise<AdminActionResult>;
@@ -482,6 +501,7 @@ export const useSimulationStore = create<SimulationStoreState>((set, get) => ({
   appliances: readLocalAppliances(),
 
   appName: DEFAULT_APP_NAME,
+  appIcon: DEFAULT_APP_ICON,
   userProfile: readInitialProfile(),
   adminStatus: {
     loaded: false,
@@ -1809,6 +1829,7 @@ export const useSimulationStore = create<SimulationStoreState>((set, get) => ({
           typeof data.appName === 'string' && data.appName.trim()
             ? data.appName.trim()
             : DEFAULT_APP_NAME,
+        appIcon: sanitizeIconSrc(data.appIcon),
         userProfile: serverProfile,
         adminToken: authenticated ? token : null,
         adminStatus: {
@@ -1852,6 +1873,7 @@ export const useSimulationStore = create<SimulationStoreState>((set, get) => ({
           typeof data.appName === 'string' && data.appName.trim()
             ? data.appName.trim()
             : state.appName,
+        appIcon: data.appIcon ? sanitizeIconSrc(data.appIcon) : state.appIcon,
         userProfile: data.userProfile
           ? { ...state.userProfile, ...data.userProfile, locationCity: localCity }
           : state.userProfile,
@@ -1926,7 +1948,7 @@ export const useSimulationStore = create<SimulationStoreState>((set, get) => ({
     get().showToast('Admin session locked.', 'info');
   },
 
-  saveProtectedIdentity: async ({ appName, userProfile }) => {
+  saveProtectedIdentity: async ({ appName, appIcon, userProfile }) => {
     const token = get().adminToken;
     if (!token) {
       return { ok: false, error: 'Unlock admin access with your password first.' };
@@ -1940,6 +1962,7 @@ export const useSimulationStore = create<SimulationStoreState>((set, get) => ({
         },
         body: JSON.stringify({
           appName,
+          ...(appIcon !== undefined ? { appIcon } : {}),
           userProfile: {
             ...userProfile,
             locationCity: get().userProfile.locationCity,
@@ -1960,6 +1983,7 @@ export const useSimulationStore = create<SimulationStoreState>((set, get) => ({
       const localCity = get().userProfile.locationCity;
       set((state) => ({
         appName: typeof data.appName === 'string' ? data.appName : state.appName,
+        appIcon: data.appIcon ? sanitizeIconSrc(data.appIcon) : state.appIcon,
         userProfile: data.userProfile
           ? { ...state.userProfile, ...data.userProfile, locationCity: localCity }
           : state.userProfile,
@@ -1971,7 +1995,7 @@ export const useSimulationStore = create<SimulationStoreState>((set, get) => ({
               : state.adminStatus.adminEmailMasked,
         },
       }));
-      get().showToast('Saved App Name and engineer profile.', 'success');
+      get().showToast('Saved App Identity and engineer profile.', 'success');
       return { ok: true };
     } catch {
       return { ok: false, error: 'Unable to reach server to save settings.' };

@@ -134,6 +134,7 @@ export const TopMenuBar: React.FC = () => {
     hasUnsavedChanges,
     savedSimulations,
     appName,
+    appIcon,
     userProfile,
     adminStatus,
     openSaveModal,
@@ -490,10 +491,10 @@ export const TopMenuBar: React.FC = () => {
           className="flex items-center gap-1.5 px-2 h-6 rounded hover:bg-slate-200/70 transition-colors font-semibold text-slate-900 whitespace-nowrap shrink-0"
         >
           <img
-            src="/assets/aistudio/bdtpower-logo_21164a7b.png"
+            src={appIcon}
             alt={`${appName} logo`}
             referrerPolicy="no-referrer"
-            className="w-5 h-5 object-contain shrink-0"
+            className="w-5 h-5 object-contain shrink-0 rounded-sm"
           />
           <span className="max-w-[140px] truncate">{appName}</span>
         </button>

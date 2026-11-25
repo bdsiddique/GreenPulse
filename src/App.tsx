@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo } from 'react';
 import { X } from 'lucide-react';
 import { solveSimulation } from './engine/dispatchEngine';
-import { useSimulationStore } from './store/useSimulationStore';
+import { sanitizeIconSrc, useSimulationStore } from './store/useSimulationStore';
 import { TopMenuBar } from './components/TopMenuBar';
 import { BottomNav } from './components/BottomNav';
 import { ControlSidebar } from './components/ControlSidebar';
@@ -23,6 +23,7 @@ export default function App() {
     workspaceMode,
     config,
     appName,
+    appIcon,
     fetchAdminSettings,
     fetchSavedSimulations,
     fetchSolarPresets,
@@ -45,6 +46,23 @@ export default function App() {
   useEffect(() => {
     document.title = `${appName} — Power Distribution Simulator`;
   }, [appName]);
+
+  // Keep browser tab favicon synced with the admin-configured App Icon
+  useEffect(() => {
+    const safeHref = sanitizeIconSrc(appIcon);
+    let iconLink = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+    if (!iconLink) {
+      iconLink = document.createElement('link');
+      iconLink.rel = 'icon';
+      document.head.appendChild(iconLink);
+    }
+    iconLink.href = safeHref;
+
+    const appleLink = document.querySelector<HTMLLinkElement>('link[rel="apple-touch-icon"]');
+    if (appleLink) {
+      appleLink.href = safeHref;
+    }
+  }, [appIcon]);
 
   // Keyboard arrow scrubbing when on Simulations tab (outside text inputs)
   useEffect(() => {
