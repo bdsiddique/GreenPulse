@@ -7,6 +7,7 @@ import {
   KeyRound,
   Lock,
   Mail,
+  Pencil,
   Plus,
   RotateCcw,
   ShieldCheck,
@@ -14,6 +15,7 @@ import {
   Trash2,
   Unlock,
   Upload,
+  X,
 } from 'lucide-react';
 import type {
   CurrencyCode,
@@ -21,7 +23,7 @@ import type {
   SolarPanelSpec,
   SolarPanelTechnology,
 } from '../types/simulation';
-import { CURRENCIES, CURRENCY_LIST, formatRate } from '../engine/currencies';
+import { CURRENCIES, CURRENCY_LIST, formatRate, type TariffBaseline } from '../engine/currencies';
 import {
   DEFAULT_APP_ICON,
   sanitizeIconSrc,
@@ -55,6 +57,9 @@ export const SettingsView: React.FC = () => {
     defaultCurrency,
     setDefaultCurrency,
     setCurrency,
+    baselineTariffs,
+    updateBaselineTariffs,
+    resetBaselineTariffs,
     solarPanels,
     defaultSolarPanelId,
     selectSolarPanel,
@@ -116,17 +121,18 @@ export const SettingsView: React.FC = () => {
     setSetupEmail(userProfile.email);
   }, [appName, appIcon, userProfile.name, userProfile.role, userProfile.organization, userProfile.email]);
 
-  // Solar panel editor state
-  const [editingPanelId, setEditingPanelId] = useState<string>(config.solarPanelId);
-  const selectedForEdit =
-    solarPanels.find((p) => p.id === editingPanelId) || solarPanels[0];
-  const [panelDraft, setPanelDraft] = useState<SolarPanelSpec>(() => ({
-    ...selectedForEdit,
-  }));
+  // Solar panel inline card editor state
+  const [editingPanelId, setEditingPanelId] = useState<string | null>(null);
+  const [panelDraft, setPanelDraft] = useState<SolarPanelSpec | null>(null);
 
   const loadPanelIntoEditor = (panel: SolarPanelSpec) => {
     setEditingPanelId(panel.id);
     setPanelDraft({ ...panel });
+  };
+
+  const handleClosePanelEditor = () => {
+    setEditingPanelId(null);
+    setPanelDraft(null);
   };
 
   const handleStartNewPanel = () => {
@@ -149,8 +155,9 @@ export const SettingsView: React.FC = () => {
 
   const handleSavePanelDraft = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!panelDraft) return;
     upsertSolarPanel(panelDraft);
-    setEditingPanelId(panelDraft.id);
+    handleClosePanelEditor();
   };
 
   const handleSetupAdmin = async (e: React.FormEvent) => {
@@ -418,15 +425,65 @@ export const SettingsView: React.FC = () => {
 
   const activeCurrency: CurrencyCode = config.currency || defaultCurrency;
   const activeCurrencyMeta = CURRENCIES[activeCurrency];
+  const activeBaseline = baselineTariffs[activeCurrency];
+
+  const [isEditingTariffs, setIsEditingTariffs] = useState(false);
+  const [tariffDraft, setTariffDraft] = useState<{
+    offPeakRate: string;
+    peakRate: string;
+    exportCreditRate: string;
+  }>({
+    offPeakRate: activeBaseline.offPeakRate.toFixed(2),
+    peakRate: activeBaseline.peakRate.toFixed(2),
+    exportCreditRate: activeBaseline.exportCreditRate.toFixed(2),
+  });
+
+  const isBaselineCustomized =
+    Math.abs(activeBaseline.offPeakRate - activeCurrencyMeta.defaultOffPeakRate) > 0.0001 ||
+    Math.abs(activeBaseline.peakRate - activeCurrencyMeta.defaultPeakRate) > 0.0001 ||
+    Math.abs(activeBaseline.exportCreditRate - activeCurrencyMeta.defaultExportCreditRate) > 0.0001;
+
+  const handleOpenTariffEditor = () => {
+    setTariffDraft({
+      offPeakRate: activeBaseline.offPeakRate.toFixed(2),
+      peakRate: activeBaseline.peakRate.toFixed(2),
+      exportCreditRate: activeBaseline.exportCreditRate.toFixed(2),
+    });
+    setIsEditingTariffs(true);
+  };
+
+  const handleCancelTariffEditor = () => {
+    setIsEditingTariffs(false);
+  };
+
+  const handleSaveTariffDraft = (e: React.FormEvent) => {
+    e.preventDefault();
+    const parseRate = (raw: string, fallback: number) => {
+      const parsed = Number(raw);
+      if (raw.trim() === '' || !Number.isFinite(parsed) || parsed < 0) return fallback;
+      return Math.round(Math.min(500, parsed) * 10000) / 10000;
+    };
+    const nextPatch: TariffBaseline = {
+      offPeakRate: parseRate(tariffDraft.offPeakRate, activeBaseline.offPeakRate),
+      peakRate: parseRate(tariffDraft.peakRate, activeBaseline.peakRate),
+      exportCreditRate: parseRate(tariffDraft.exportCreditRate, activeBaseline.exportCreditRate),
+    };
+    updateBaselineTariffs(activeCurrency, nextPatch);
+    setIsEditingTariffs(false);
+    showToast(`Updated baseline tariffs for ${activeCurrencyMeta.code}.`, 'success');
+  };
 
   const handleSelectCurrency = (code: CurrencyCode) => {
+    setIsEditingTariffs(false);
     const meta = CURRENCIES[code];
     setDefaultCurrency(code);
     setCurrency(code, true);
     showToast(`Switched billing currency to ${meta.code} (${meta.symbol})`, 'info');
   };
 
-  const isDraftSavedInCatalog = solarPanels.some((p) => p.id === panelDraft.id);
+  const isAddingNewPanel = Boolean(
+    panelDraft && !solarPanels.some((p) => p.id === panelDraft.id)
+  );
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 py-5 space-y-6">
@@ -502,15 +559,132 @@ export const SettingsView: React.FC = () => {
           })}
         </div>
 
-        <div className="rounded-lg bg-slate-50 border border-slate-200 p-3 flex flex-wrap items-center justify-between gap-2 text-xs">
-          <div className="text-slate-600">
-            Baseline tariffs for <strong>{activeCurrencyMeta.code}</strong>:{' '}
-            <span className="font-mono text-slate-900">
-              Off-Peak {formatRate(activeCurrencyMeta.defaultOffPeakRate, activeCurrency)} · Peak{' '}
-              {formatRate(activeCurrencyMeta.defaultPeakRate, activeCurrency)} · Export{' '}
-              {formatRate(activeCurrencyMeta.defaultExportCreditRate, activeCurrency)}
-            </span>
+        <div className="rounded-lg bg-slate-50 border border-slate-200 p-3.5 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div className="text-slate-600">
+              Baseline tariffs for <strong className="text-slate-900">{activeCurrencyMeta.code}</strong>:{' '}
+              <span className="font-mono tabular-nums text-slate-900">
+                Off-Peak {formatRate(activeBaseline.offPeakRate, activeCurrency)} · Peak{' '}
+                {formatRate(activeBaseline.peakRate, activeCurrency)} · Export{' '}
+                {formatRate(activeBaseline.exportCreditRate, activeCurrency)}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1.5 shrink-0">
+              {isBaselineCustomized && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    resetBaselineTariffs(activeCurrency);
+                    setIsEditingTariffs(false);
+                  }}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-slate-200 bg-white hover:bg-slate-100 text-[11px] font-medium text-slate-700 whitespace-nowrap shrink-0 cursor-pointer"
+                  title={`Restore built-in ${activeCurrencyMeta.code} tariff defaults`}
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  Reset Defaults
+                </button>
+              )}
+
+              {!isEditingTariffs ? (
+                <button
+                  type="button"
+                  onClick={handleOpenTariffEditor}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-slate-300 bg-white hover:bg-slate-900 hover:text-white hover:border-slate-900 text-[11px] font-semibold text-slate-800 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  <Pencil className="w-3 h-3" />
+                  Edit
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleCancelTariffEditor}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-slate-200 bg-white hover:bg-slate-100 text-[11px] font-medium text-slate-600 whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  <X className="w-3 h-3" />
+                  Close
+                </button>
+              )}
+            </div>
           </div>
+
+          {isEditingTariffs && (
+            <form
+              onSubmit={handleSaveTariffDraft}
+              className="pt-3 border-t border-slate-200 space-y-3"
+            >
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {(
+                  [
+                    {
+                      key: 'offPeakRate',
+                      label: 'Off-Peak Rate',
+                      hint: `Default ${formatRate(activeCurrencyMeta.defaultOffPeakRate, activeCurrency)}`,
+                    },
+                    {
+                      key: 'peakRate',
+                      label: 'Peak Rate',
+                      hint: `Default ${formatRate(activeCurrencyMeta.defaultPeakRate, activeCurrency)}`,
+                    },
+                    {
+                      key: 'exportCreditRate',
+                      label: 'Export Rate',
+                      hint: `Default ${formatRate(activeCurrencyMeta.defaultExportCreditRate, activeCurrency)}`,
+                    },
+                  ] as const
+                ).map(({ key, label, hint }) => (
+                  <label key={key} className="block space-y-1">
+                    <div className="flex items-center justify-between gap-1 text-[11px]">
+                      <span className="font-medium text-slate-700">{label}</span>
+                      <span className="font-mono tabular-nums text-slate-400">{hint}</span>
+                    </div>
+                    <div className="flex items-center rounded-lg border border-slate-300 bg-white focus-within:border-slate-900 transition-colors overflow-hidden">
+                      <span className="pl-2.5 pr-1.5 font-mono text-xs font-semibold text-slate-500 select-none">
+                        {activeCurrencyMeta.symbol}
+                      </span>
+                      <input
+                        type="number"
+                        min={0}
+                        max={500}
+                        step={activeCurrencyMeta.decimals === 0 ? 0.1 : 0.01}
+                        aria-label={`${activeCurrencyMeta.code} ${label}`}
+                        value={tariffDraft[key]}
+                        onChange={(e) =>
+                          setTariffDraft((prev) => ({ ...prev, [key]: e.target.value }))
+                        }
+                        className="w-full py-1.5 bg-transparent font-mono tabular-nums text-xs font-semibold text-slate-900 focus:outline-none"
+                      />
+                      <span className="pr-2.5 pl-1 font-mono text-[11px] text-slate-400 select-none whitespace-nowrap">
+                        /kWh
+                      </span>
+                    </div>
+                  </label>
+                ))}
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                <p className="text-[11px] text-slate-500">
+                  Saving updates {activeCurrencyMeta.code} defaults and applies immediately to the active simulation.
+                </p>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={handleCancelTariffEditor}
+                    className="px-3 py-1.5 rounded-md border border-slate-300 bg-white hover:bg-slate-100 text-xs font-medium text-slate-700 whitespace-nowrap shrink-0 cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-md bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold whitespace-nowrap shrink-0 cursor-pointer"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    Save Tariffs
+                  </button>
+                </div>
+              </div>
+            </form>
+          )}
         </div>
       </section>
 
@@ -533,7 +707,7 @@ export const SettingsView: React.FC = () => {
             <button
               type="button"
               onClick={handleStartNewPanel}
-              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md bg-slate-900 hover:bg-slate-800 text-white text-xs font-medium"
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md bg-slate-900 hover:bg-slate-800 text-white text-xs font-medium whitespace-nowrap shrink-0 cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5" />
               Add Panel
@@ -542,9 +716,9 @@ export const SettingsView: React.FC = () => {
               type="button"
               onClick={() => {
                 resetSolarPanelsToDefaults();
-                setEditingPanelId(solarPanels[0]?.id || 'panel_topcon_580');
+                handleClosePanelEditor();
               }}
-              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-xs font-medium text-slate-700"
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-xs font-medium text-slate-700 whitespace-nowrap shrink-0 cursor-pointer"
               title="Restore built-in calibrated solar panels"
             >
               <RotateCcw className="w-3.5 h-3.5" />
@@ -553,104 +727,29 @@ export const SettingsView: React.FC = () => {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
-          {/* Panel Selector List */}
-          <div className="lg:col-span-5 space-y-2">
-            {solarPanels.map((panel) => {
-              const isActiveSim = config.solarPanelId === panel.id;
-              const isDefault = defaultSolarPanelId === panel.id;
-              const isEditing = panelDraft.id === panel.id;
-              return (
-                <div
-                  key={panel.id}
-                  onClick={() => loadPanelIntoEditor(panel)}
-                  className={`rounded-lg border p-3 cursor-pointer transition-colors ${
-                    isEditing
-                      ? 'border-slate-900 bg-slate-50'
-                      : 'border-slate-200 bg-white hover:border-slate-300'
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="text-xs font-semibold text-slate-900 truncate flex items-center gap-1.5">
-                        <span>{panel.name}</span>
-                      </div>
-                      <div className="text-[11px] text-slate-500 mt-0.5">
-                        {panel.technology} · {panel.manufacturer}
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-1 shrink-0">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          selectSolarPanel(panel.id, true);
-                          loadPanelIntoEditor(panel);
-                        }}
-                        className={`inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-semibold transition-colors ${
-                          isActiveSim
-                            ? 'bg-emerald-600 text-white'
-                            : 'bg-slate-100 text-slate-700 hover:bg-slate-900 hover:text-white'
-                        }`}
-                      >
-                        {isActiveSim && <Check className="w-3 h-3" />}
-                        {isActiveSim ? (isDefault ? 'Active · Default' : 'Active') : 'Use Panel'}
-                      </button>
-
-                      {solarPanels.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            deleteSolarPanel(panel.id);
-                          }}
-                          className="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50"
-                          title="Delete panel"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="mt-2 pt-2 border-t border-slate-100 grid grid-cols-4 gap-1 font-mono tabular-nums text-[10px] text-slate-600">
-                    <div>
-                      <span className="text-slate-400 block">Rated</span>
-                      <strong className="text-slate-900">{panel.wattageWp} Wp</strong>
-                    </div>
-                    <div>
-                      <span className="text-slate-400 block">Eff.</span>
-                      <strong className="text-slate-900">{panel.efficiencyPct}%</strong>
-                    </div>
-                    <div>
-                      <span className="text-slate-400 block">Temp Coeff</span>
-                      <strong className="text-slate-900">{panel.tempCoeffPctPerC}%/°C</strong>
-                    </div>
-                    <div>
-                      <span className="text-slate-400 block">NOCT / BOS</span>
-                      <strong className="text-slate-900">
-                        {panel.noctC}°C / -{panel.systemLossPct}%
-                      </strong>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Panel Parameter Editor Form */}
+        {/* New Custom Solar Panel Card (shown when Add Panel is clicked) */}
+        {isAddingNewPanel && panelDraft && (
           <form
             onSubmit={handleSavePanelDraft}
-            className="lg:col-span-7 rounded-lg border border-slate-200 bg-slate-50/60 p-4 space-y-3"
+            className="rounded-lg border border-slate-900 bg-slate-50/70 p-4 space-y-3"
           >
             <div className="flex items-center justify-between gap-2 border-b border-slate-200 pb-2">
               <div className="text-xs font-semibold text-slate-900">
-                {isDraftSavedInCatalog ? 'Edit Panel Specification' : 'New Custom Solar Panel'}
+                New Custom Solar Panel
               </div>
-              <span className="font-mono text-[10px] text-slate-500">
-                STC 1000 W/m² · 25°C
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-[10px] text-slate-500">
+                  STC 1000 W/m² · 25°C
+                </span>
+                <button
+                  type="button"
+                  onClick={handleClosePanelEditor}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-slate-200 bg-white hover:bg-slate-100 text-[11px] font-medium text-slate-600 cursor-pointer"
+                >
+                  <X className="w-3 h-3" />
+                  Cancel
+                </button>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -802,8 +901,15 @@ export const SettingsView: React.FC = () => {
               </span>
               <div className="flex items-center gap-2">
                 <button
+                  type="button"
+                  onClick={handleClosePanelEditor}
+                  className="px-3 py-1.5 rounded-md border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
                   type="submit"
-                  className="px-3.5 py-1.5 rounded-md bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold transition-colors"
+                  className="px-3.5 py-1.5 rounded-md bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer"
                 >
                   Save Panel Specs
                 </button>
@@ -812,14 +918,303 @@ export const SettingsView: React.FC = () => {
                   onClick={() => {
                     upsertSolarPanel(panelDraft);
                     selectSolarPanel(panelDraft.id, true);
+                    handleClosePanelEditor();
                   }}
-                  className="px-3 py-1.5 rounded-md border border-slate-300 bg-white hover:bg-slate-100 text-slate-800 text-xs font-semibold transition-colors"
+                  className="px-3.5 py-1.5 rounded-md border border-slate-300 bg-white hover:bg-slate-100 text-slate-800 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer"
                 >
                   Save & Set Default
                 </button>
               </div>
             </div>
           </form>
+        )}
+
+        {/* Panel Catalog Grid — each card has its own Edit button & inline editor */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-start">
+          {solarPanels.map((panel) => {
+            const isActiveSim = config.solarPanelId === panel.id;
+            const isDefault = defaultSolarPanelId === panel.id;
+            const isEditing = editingPanelId === panel.id && panelDraft !== null;
+            return (
+              <div
+                key={panel.id}
+                className={`rounded-lg border p-3.5 transition-colors ${
+                  isEditing
+                    ? 'md:col-span-2 border-slate-900 bg-slate-50/70'
+                    : 'border-slate-200 bg-white hover:border-slate-300'
+                }`}
+              >
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-xs font-semibold text-slate-900 truncate flex items-center gap-1.5">
+                      <span>{panel.name}</span>
+                    </div>
+                    <div className="text-[11px] text-slate-500 mt-0.5">
+                      {panel.technology} · {panel.manufacturer}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => selectSolarPanel(panel.id, true)}
+                      className={`inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                        isActiveSim
+                          ? 'bg-emerald-600 text-white'
+                          : 'bg-slate-100 text-slate-700 hover:bg-slate-900 hover:text-white'
+                      }`}
+                    >
+                      {isActiveSim && <Check className="w-3 h-3" />}
+                      {isActiveSim ? (isDefault ? 'Active · Default' : 'Active') : 'Use Panel'}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        isEditing ? handleClosePanelEditor() : loadPanelIntoEditor(panel)
+                      }
+                      className={`inline-flex items-center gap-1 px-2 py-1 rounded border text-[11px] font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                        isEditing
+                          ? 'border-slate-900 bg-slate-900 text-white'
+                          : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100'
+                      }`}
+                      title={isEditing ? 'Close editor' : `Edit ${panel.name} specifications`}
+                    >
+                      {isEditing ? <X className="w-3 h-3" /> : <Pencil className="w-3 h-3" />}
+                      {isEditing ? 'Close' : 'Edit'}
+                    </button>
+
+                    {solarPanels.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (isEditing) handleClosePanelEditor();
+                          deleteSolarPanel(panel.id);
+                        }}
+                        className="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 cursor-pointer"
+                        title="Delete panel"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="mt-2.5 pt-2.5 border-t border-slate-100 grid grid-cols-4 gap-2 font-mono tabular-nums text-[10px] text-slate-600">
+                  <div>
+                    <span className="text-slate-400 block">Rated</span>
+                    <strong className="text-slate-900">{panel.wattageWp} Wp</strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block">Eff.</span>
+                    <strong className="text-slate-900">{panel.efficiencyPct}%</strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block">Temp Coeff</span>
+                    <strong className="text-slate-900">{panel.tempCoeffPctPerC}%/°C</strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block">NOCT / BOS</span>
+                    <strong className="text-slate-900">
+                      {panel.noctC}°C / -{panel.systemLossPct}%
+                    </strong>
+                  </div>
+                </div>
+
+                {/* Inline Panel Specification Editor inside this card */}
+                {isEditing && panelDraft && (
+                  <form
+                    onSubmit={handleSavePanelDraft}
+                    className="mt-3.5 pt-3.5 border-t border-slate-200 space-y-3"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-xs font-semibold text-slate-900">
+                        Edit Panel Specification
+                      </div>
+                      <span className="font-mono text-[10px] text-slate-500">
+                        STC 1000 W/m² · 25°C
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <label className="block text-[11px] font-medium text-slate-700">
+                        Model Name
+                        <input
+                          type="text"
+                          required
+                          value={panelDraft.name}
+                          onChange={(e) => setPanelDraft({ ...panelDraft, name: e.target.value })}
+                          className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-slate-900"
+                        />
+                      </label>
+
+                      <label className="block text-[11px] font-medium text-slate-700">
+                        Cell Technology
+                        <select
+                          value={panelDraft.technology}
+                          onChange={(e) =>
+                            setPanelDraft({
+                              ...panelDraft,
+                              technology: e.target.value as SolarPanelTechnology,
+                            })
+                          }
+                          className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-slate-900"
+                        >
+                          {PANEL_TECHNOLOGIES.map((tech) => (
+                            <option key={tech} value={tech}>
+                              {tech}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                      <label className="block text-[11px] font-medium text-slate-700">
+                        Rated Power (Wp)
+                        <input
+                          type="number"
+                          min={50}
+                          max={1200}
+                          step={5}
+                          value={panelDraft.wattageWp}
+                          onChange={(e) =>
+                            setPanelDraft({
+                              ...panelDraft,
+                              wattageWp: Math.max(50, Number(e.target.value) || 0),
+                            })
+                          }
+                          className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2.5 py-1.5 font-mono tabular-nums text-xs text-slate-900 focus:outline-none focus:border-slate-900"
+                        />
+                      </label>
+
+                      <label className="block text-[11px] font-medium text-slate-700">
+                        Efficiency (%)
+                        <input
+                          type="number"
+                          min={8}
+                          max={35}
+                          step={0.1}
+                          value={panelDraft.efficiencyPct}
+                          onChange={(e) =>
+                            setPanelDraft({
+                              ...panelDraft,
+                              efficiencyPct: Number(e.target.value) || 0,
+                            })
+                          }
+                          className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2.5 py-1.5 font-mono tabular-nums text-xs text-slate-900 focus:outline-none focus:border-slate-900"
+                        />
+                      </label>
+
+                      <label className="block text-[11px] font-medium text-slate-700">
+                        Module Area (m²)
+                        <input
+                          type="number"
+                          min={0.3}
+                          max={6}
+                          step={0.01}
+                          value={panelDraft.areaM2}
+                          onChange={(e) =>
+                            setPanelDraft({
+                              ...panelDraft,
+                              areaM2: Number(e.target.value) || 0,
+                            })
+                          }
+                          className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2.5 py-1.5 font-mono tabular-nums text-xs text-slate-900 focus:outline-none focus:border-slate-900"
+                        />
+                      </label>
+
+                      <label className="block text-[11px] font-medium text-slate-700">
+                        Temp Coeff (%/°C)
+                        <input
+                          type="number"
+                          min={-0.7}
+                          max={-0.05}
+                          step={0.01}
+                          value={panelDraft.tempCoeffPctPerC}
+                          onChange={(e) =>
+                            setPanelDraft({
+                              ...panelDraft,
+                              tempCoeffPctPerC: Number(e.target.value) || -0.35,
+                            })
+                          }
+                          className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2.5 py-1.5 font-mono tabular-nums text-xs text-slate-900 focus:outline-none focus:border-slate-900"
+                        />
+                      </label>
+
+                      <label className="block text-[11px] font-medium text-slate-700">
+                        NOCT (°C)
+                        <input
+                          type="number"
+                          min={30}
+                          max={60}
+                          step={1}
+                          value={panelDraft.noctC}
+                          onChange={(e) =>
+                            setPanelDraft({
+                              ...panelDraft,
+                              noctC: Number(e.target.value) || 45,
+                            })
+                          }
+                          className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2.5 py-1.5 font-mono tabular-nums text-xs text-slate-900 focus:outline-none focus:border-slate-900"
+                        />
+                      </label>
+
+                      <label className="block text-[11px] font-medium text-slate-700">
+                        BOS / Soiling Loss (%)
+                        <input
+                          type="number"
+                          min={0}
+                          max={40}
+                          step={0.5}
+                          value={panelDraft.systemLossPct}
+                          onChange={(e) =>
+                            setPanelDraft({
+                              ...panelDraft,
+                              systemLossPct: Number(e.target.value) || 0,
+                            })
+                          }
+                          className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2.5 py-1.5 font-mono tabular-nums text-xs text-slate-900 focus:outline-none focus:border-slate-900"
+                        />
+                      </label>
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-200">
+                      <span className="font-mono text-[10px] text-slate-500">
+                        STC Check: {(panelDraft.areaM2 * (panelDraft.efficiencyPct / 100) * 1000).toFixed(0)} W @ 1000 W/m²
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={handleClosePanelEditor}
+                          className="px-3 py-1.5 rounded-md border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="submit"
+                          className="px-3.5 py-1.5 rounded-md bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                        >
+                          Save Panel Specs
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            upsertSolarPanel(panelDraft);
+                            selectSolarPanel(panelDraft.id, true);
+                            handleClosePanelEditor();
+                          }}
+                          className="px-3.5 py-1.5 rounded-md border border-slate-300 bg-white hover:bg-slate-100 text-slate-800 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                        >
+                          Save & Set Default
+                        </button>
+                      </div>
+                    </div>
+                  </form>
+                )}
+              </div>
+            );
+          })}
         </div>
       </section>
 

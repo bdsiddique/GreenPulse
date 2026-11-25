@@ -10,6 +10,12 @@ export interface CurrencyMeta {
   defaultExportCreditRate: number;
 }
 
+export interface TariffBaseline {
+  offPeakRate: number;
+  peakRate: number;
+  exportCreditRate: number;
+}
+
 export const CURRENCIES: Record<CurrencyCode, CurrencyMeta> = {
   BDT: {
     code: 'BDT',

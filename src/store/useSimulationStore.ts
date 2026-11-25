@@ -27,7 +27,7 @@ import {
   DEFAULT_SOLAR_PANEL_ID,
   normalizeSolarPanel,
 } from '../engine/solarPanels';
-import { CURRENCIES } from '../engine/currencies';
+import { CURRENCIES, CURRENCY_LIST, type TariffBaseline } from '../engine/currencies';
 import {
   buildFabricatedRowsFromParametric,
   ensureFabricatedRows,
@@ -52,6 +52,7 @@ import {
 const LS_SAVED_KEY = 'gridpulse_saved_simulations_v1';
 const LS_PROFILE_KEY = 'gridpulse_user_profile_v1';
 const LS_CURRENCY_KEY = 'gridpulse_default_currency_v1';
+const LS_BASELINE_TARIFFS_KEY = 'gridpulse_baseline_tariffs_v1';
 const LS_DESCO_KEY = 'gridpulse_desco_config_v1';
 const LS_APPLIANCES_KEY = 'gridpulse_appliances_v1';
 const LS_SOLAR_PRESETS_KEY = 'gridpulse_solar_presets_v1';
@@ -139,6 +140,68 @@ function readLocalDefaultCurrency(): CurrencyCode {
     return 'BDT';
   } catch {
     return 'BDT';
+  }
+}
+
+function getBuiltInBaselineTariffs(): Record<CurrencyCode, TariffBaseline> {
+  return {
+    BDT: {
+      offPeakRate: CURRENCIES.BDT.defaultOffPeakRate,
+      peakRate: CURRENCIES.BDT.defaultPeakRate,
+      exportCreditRate: CURRENCIES.BDT.defaultExportCreditRate,
+    },
+    USD: {
+      offPeakRate: CURRENCIES.USD.defaultOffPeakRate,
+      peakRate: CURRENCIES.USD.defaultPeakRate,
+      exportCreditRate: CURRENCIES.USD.defaultExportCreditRate,
+    },
+    EUR: {
+      offPeakRate: CURRENCIES.EUR.defaultOffPeakRate,
+      peakRate: CURRENCIES.EUR.defaultPeakRate,
+      exportCreditRate: CURRENCIES.EUR.defaultExportCreditRate,
+    },
+    INR: {
+      offPeakRate: CURRENCIES.INR.defaultOffPeakRate,
+      peakRate: CURRENCIES.INR.defaultPeakRate,
+      exportCreditRate: CURRENCIES.INR.defaultExportCreditRate,
+    },
+  };
+}
+
+function clampTariffRate(value: unknown, fallback: number): number {
+  const num = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(num) || num < 0) return fallback;
+  return Math.round(Math.min(500, num) * 10000) / 10000;
+}
+
+function readLocalBaselineTariffs(): Record<CurrencyCode, TariffBaseline> {
+  const defaults = getBuiltInBaselineTariffs();
+  try {
+    const raw = localStorage.getItem(LS_BASELINE_TARIFFS_KEY);
+    if (!raw) return defaults;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return defaults;
+    for (const code of CURRENCY_LIST) {
+      const entry = parsed[code];
+      if (entry && typeof entry === 'object') {
+        defaults[code] = {
+          offPeakRate: clampTariffRate(entry.offPeakRate, defaults[code].offPeakRate),
+          peakRate: clampTariffRate(entry.peakRate, defaults[code].peakRate),
+          exportCreditRate: clampTariffRate(entry.exportCreditRate, defaults[code].exportCreditRate),
+        };
+      }
+    }
+    return defaults;
+  } catch {
+    return defaults;
+  }
+}
+
+function writeLocalBaselineTariffs(tariffs: Record<CurrencyCode, TariffBaseline>) {
+  try {
+    localStorage.setItem(LS_BASELINE_TARIFFS_KEY, JSON.stringify(tariffs));
+  } catch {
+    // ignore
   }
 }
 
@@ -314,6 +377,7 @@ interface SimulationStoreState {
   adminStatus: AdminStatus;
   adminToken: string | null; // Held strictly in JS/React memory (never persisted to browser storage)
   defaultCurrency: CurrencyCode;
+  baselineTariffs: Record<CurrencyCode, TariffBaseline>;
   toast: ToastNotice | null;
 
   // Navigation & UI
@@ -442,15 +506,19 @@ interface SimulationStoreState {
   // Non-sensitive workspace preferences
   updateLocationCity: (city: string) => void;
   setDefaultCurrency: (currency: CurrencyCode) => void;
+  updateBaselineTariffs: (currency: CurrencyCode, patch: Partial<TariffBaseline>) => void;
+  resetBaselineTariffs: (currency: CurrencyCode) => void;
 }
 
 const initialCurrency = readLocalDefaultCurrency();
+const initialBaselineTariffs = readLocalBaselineTariffs();
 const initialSolarPanels = readLocalSolarPanels();
 const initialDefaultPanelId = readLocalDefaultPanelId(initialSolarPanels);
 const initialDefaultPanel =
   initialSolarPanels.find((p) => p.id === initialDefaultPanelId) || BUILTIN_SOLAR_PANELS[0];
 const initialConfig: SimulationConfig = {
   ...createDefaultConfig(initialCurrency),
+  ...initialBaselineTariffs[initialCurrency],
   solarPanelId: initialDefaultPanel.id,
   solarPanelSnapshot: initialDefaultPanel,
 };
@@ -513,6 +581,7 @@ export const useSimulationStore = create<SimulationStoreState>((set, get) => ({
   },
   adminToken: null,
   defaultCurrency: initialCurrency,
+  baselineTariffs: initialBaselineTariffs,
   toast: null,
 
   setActiveTab: (tab) => set({ activeTab: tab, isPlaying: false }),
@@ -951,16 +1020,20 @@ export const useSimulationStore = create<SimulationStoreState>((set, get) => ({
   },
 
   setCurrency: (currency, resetTariffDefaults = true) => {
-    const meta = CURRENCIES[currency];
     set((state) => {
+      const baseline = state.baselineTariffs[currency] || {
+        offPeakRate: CURRENCIES[currency].defaultOffPeakRate,
+        peakRate: CURRENCIES[currency].defaultPeakRate,
+        exportCreditRate: CURRENCIES[currency].defaultExportCreditRate,
+      };
       const nextConfig: SimulationConfig = {
         ...state.config,
         currency,
         ...(resetTariffDefaults
           ? {
-              offPeakRate: meta.defaultOffPeakRate,
-              peakRate: meta.defaultPeakRate,
-              exportCreditRate: meta.defaultExportCreditRate,
+              offPeakRate: baseline.offPeakRate,
+              peakRate: baseline.peakRate,
+              exportCreditRate: baseline.exportCreditRate,
             }
           : {}),
       };
@@ -991,6 +1064,7 @@ export const useSimulationStore = create<SimulationStoreState>((set, get) => ({
   resetSandbox: () => {
     const state = get();
     const defCurrency = state.defaultCurrency;
+    const defBaseline = state.baselineTariffs[defCurrency];
     const defPanel =
       state.solarPanels.find((p) => p.id === state.defaultSolarPanelId) ||
       state.solarPanels[0] ||
@@ -998,6 +1072,13 @@ export const useSimulationStore = create<SimulationStoreState>((set, get) => ({
     set({
       config: {
         ...createDefaultConfig(defCurrency),
+        ...(defBaseline
+          ? {
+              offPeakRate: defBaseline.offPeakRate,
+              peakRate: defBaseline.peakRate,
+              exportCreditRate: defBaseline.exportCreditRate,
+            }
+          : {}),
         solarPanelId: defPanel.id,
         solarPanelSnapshot: defPanel,
       },
@@ -2109,5 +2190,75 @@ export const useSimulationStore = create<SimulationStoreState>((set, get) => ({
       // ignore
     }
     set({ defaultCurrency: currency });
+  },
+
+  updateBaselineTariffs: (currency, patch) => {
+    set((state) => {
+      const current = state.baselineTariffs[currency];
+      const nextForCurrency: TariffBaseline = {
+        offPeakRate:
+          patch.offPeakRate !== undefined
+            ? clampTariffRate(patch.offPeakRate, current.offPeakRate)
+            : current.offPeakRate,
+        peakRate:
+          patch.peakRate !== undefined
+            ? clampTariffRate(patch.peakRate, current.peakRate)
+            : current.peakRate,
+        exportCreditRate:
+          patch.exportCreditRate !== undefined
+            ? clampTariffRate(patch.exportCreditRate, current.exportCreditRate)
+            : current.exportCreditRate,
+      };
+      const nextBaselines: Record<CurrencyCode, TariffBaseline> = {
+        ...state.baselineTariffs,
+        [currency]: nextForCurrency,
+      };
+      writeLocalBaselineTariffs(nextBaselines);
+
+      if (state.config.currency === currency) {
+        return {
+          baselineTariffs: nextBaselines,
+          config: {
+            ...state.config,
+            offPeakRate: nextForCurrency.offPeakRate,
+            peakRate: nextForCurrency.peakRate,
+            exportCreditRate: nextForCurrency.exportCreditRate,
+          },
+          hasUnsavedChanges: true,
+        };
+      }
+      return { baselineTariffs: nextBaselines };
+    });
+  },
+
+  resetBaselineTariffs: (currency) => {
+    const meta = CURRENCIES[currency];
+    const builtIn: TariffBaseline = {
+      offPeakRate: meta.defaultOffPeakRate,
+      peakRate: meta.defaultPeakRate,
+      exportCreditRate: meta.defaultExportCreditRate,
+    };
+    set((state) => {
+      const nextBaselines: Record<CurrencyCode, TariffBaseline> = {
+        ...state.baselineTariffs,
+        [currency]: builtIn,
+      };
+      writeLocalBaselineTariffs(nextBaselines);
+
+      if (state.config.currency === currency) {
+        return {
+          baselineTariffs: nextBaselines,
+          config: {
+            ...state.config,
+            offPeakRate: builtIn.offPeakRate,
+            peakRate: builtIn.peakRate,
+            exportCreditRate: builtIn.exportCreditRate,
+          },
+          hasUnsavedChanges: true,
+        };
+      }
+      return { baselineTariffs: nextBaselines };
+    });
+    get().showToast(`Restored built-in baseline tariffs for ${meta.code}.`, 'info');
   },
 }));
