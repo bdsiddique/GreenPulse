@@ -1,5 +1,5 @@
 {
-  "name": "react-example",
+  "name": "Gridpulse",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -42,5 +42,10 @@
     "tsx": "^4.21.0",
     "typescript": "^7.0.2",
     "@types/express": "^4.17.21"
+  },
+  "pnpm": {
+    "allowBuilds": {
+      "esbuild@0.28.2": true
+    }
   }
 }
